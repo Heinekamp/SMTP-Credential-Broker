@@ -1,0 +1,234 @@
+# Architecture
+
+## 1. Purpose and scope
+
+The Managed SMTP Relay is a self-hosted management plane around Postfix. It
+lets a small number of externally-hosted SMTP mailboxes (e.g. STRATO accounts)
+be shared by many internal services, without ever handing those services the
+upstream credentials.
+
+```text
+Internal services ──▶ Managed SMTP Relay ──▶ External SMTP provider(s)
+                       (Web UI, API, Postfix)
+```
+
+This document covers the system as a whole: components, data flow, technology
+choices, and the configuration-generation pipeline. Postfix-specific detail
+lives in [postfix-architecture.md](postfix-architecture.md); the threat model
+and secret handling live in [security-model.md](security-model.md).
+
+## 2. Non-goals
+
+The application does **not** reimplement any part of SMTP. It does not speak
+SMTP to inbound clients or outbound servers itself, does not queue or retry
+mail, and does not do TLS negotiation. All of that is Postfix's job. The
+application's job is to **decide what Postfix's configuration should say**,
+write it out, validate it, and apply it.
+
+## 3. Component overview
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                        "app" container                          │
+│                                                                   │
+│  ┌───────────────┐   ┌───────────────┐   ┌────────────────────┐ │
+│  │   React SPA   │   │   FastAPI     │   │  Config generator  │ │
+│  │ (served as    │──▶│   REST API    │──▶│  (Jinja2 templates │ │
+│  │  static files)│   │               │   │   + map builders)  │ │
+│  └───────────────┘   └───────┬───────┘   └──────────┬─────────┘ │
+│                               │                       │           │
+│                        ┌──────▼──────┐                │           │
+│                        │   SQLite    │                │           │
+│                        │  (SQLAlchemy│                │           │
+│                        │  + Alembic) │                │           │
+│                        └─────────────┘                │           │
+└────────────────────────────────────────────────────────┼─────────┘
+                                                           │ shared volume
+                                                           │ (config + maps)
+┌──────────────────────────────────────────────────────────▼─────────┐
+│                       "postfix" container                          │
+│                                                                     │
+│  main.cf / master.cf   sasl_passwd.db   sender_login.db   sasldb2  │
+│         │                    │                │              │     │
+│         ▼                    ▼                ▼              ▼     │
+│                        postfix (smtpd, smtp, cleanup, qmgr, ...)    │
+└──────────────────────────────────────────────────────┬─────────────┘
+                                                          │
+                                                          ▼
+                                                 External SMTP provider(s)
+```
+
+The app never talks SMTP to Postfix or to upstream providers for the purpose
+of sending mail. The one exception is the explicit **"Test connection"**
+feature (§15 of the brief), which opens a short-lived TCP/TLS/SMTP session
+directly from the app to the upstream host to verify DNS/TCP/TLS/AUTH — this
+is diagnostic, not part of the mail path, and is clearly labeled as such in
+the UI.
+
+## 4. Technology stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Backend | Python 3.12 + FastAPI | Async-capable, strong typing via Pydantic, mature ecosystem for everything else this app needs (SQLAlchemy, Alembic, Jinja2, cryptography, pyotp). Confirmed with the user as the preferred stack. |
+| ORM / migrations | SQLAlchemy 2.x + Alembic | Versioned schema migrations are a hard requirement (spec §31); Alembic is the standard tool and works identically against SQLite and Postgres. |
+| Database | SQLite (WAL mode) by default | Confirmed with the user. Single file, trivial backup (copy the file), sufficient for the expected scale (a handful of upstream accounts, tens of local users/senders, moderate log volume). Models are kept dialect-neutral (no SQLite-only types, explicit migrations) so Postgres is a configuration change (`DATABASE_URL`), not a rewrite, if a deployment outgrows it. |
+| Config templating | Jinja2 | Already a FastAPI/Python-ecosystem dependency in spirit; well suited to generating `main.cf`, `master.cf`, and lookup-table source files from typed data. |
+| Frontend | React + TypeScript + Vite, TanStack Query | Claude Design's output in this environment is React/Tailwind-based (Phase 4). Using the same stack means design artifacts become real components with minimal translation, rather than being redrawn in a different framework. |
+| SMTP engine | Postfix (Debian stable package) | Mandated by the brief. Not patched or forked — only configured. |
+| Local SMTP AUTH | Cyrus SASL, `sasldb2` | See §5.2 below and [security-model.md](security-model.md) §4. |
+| Secrets encryption | AES-256-GCM via `cryptography` (Python) | Authenticated encryption, no custom crypto. See [security-model.md](security-model.md) §1-3. |
+| Admin auth | argon2id, server-side sessions, CSRF token, optional TOTP | Independent of all SMTP credentials (spec §21). |
+| Containerization | Docker Compose | Required deployment target (spec §22). |
+
+### Why not Dovecot for SASL?
+
+Many mail-management stacks (Mailu, Modoboa, iRedMail) run Dovecot purely as a
+SASL backend for Postfix, even without offering IMAP. That's a defensible
+choice for those projects because they also need Dovecot for mailbox access.
+This relay never stores or serves mailboxes — it only needs "is this
+username/password pair one of our local SMTP users." Cyrus SASL's `sasldb2`
+backend answers exactly that question, is maintained as part of the Postfix
+Docker base image's SASL library, and avoids adding a fourth long-running
+process/container purely for authentication. The tradeoff — `sasldb2` needs a
+plaintext-equivalent secret store, shelled into via `saslpasswd2` — is
+accepted and documented as a threat-model boundary in
+[security-model.md](security-model.md) §4, per the brief's explicit
+fallback clause (spec §9). If future requirements need SQL-backed or
+LDAP-backed SASL, Dovecot remains a documented, swappable alternative — see
+[security-model.md](security-model.md) §4 for the tradeoff table.
+
+## 5. Configuration-generation pipeline
+
+The single most important architectural rule in this system: **the
+application never hand-edits Postfix configuration.** Every change to
+upstream accounts, senders, local users, or permissions flows through one
+deterministic pipeline.
+
+```text
+Database state (SQLAlchemy models)
+        │
+        ▼
+Config generator (Python + Jinja2)
+   - renders main.cf / master.cf from templates + DB-derived context
+   - renders map *source* files (sender_login, sender_relayhost,
+     sasl_passwd) from DB rows
+        │
+        ▼
+Write to a temp path inside the shared volume
+        │
+        ▼
+Validate
+   - `postconf -c <tmpdir>` syntax-checks main.cf/master.cf
+   - `postmap -q` / `postmap` dry-run style check on each map source
+   - internal invariant checks (e.g. every sender referenced by a
+     permission actually exists and is enabled)
+        │
+        ├── validation FAILS ──▶ abort, keep previous config active,
+        │                        surface the error in the UI + audit log
+        ▼
+Validation PASSES
+        │
+        ▼
+Atomic install
+   - `postmap` writes each `.db` next to its source, then renames
+     into place (postmap itself is already atomic — see
+     postfix-architecture.md §7)
+   - main.cf/master.cf are written to a temp file in the same
+     directory and rename(2)'d over the live file (atomic on the
+     shared volume's filesystem)
+        │
+        ▼
+Apply
+   - map-only changes (sender/permission/upstream edits that don't
+     touch main.cf/master.cf structure): NO reload needed — Postfix
+     detects the changed table file automatically (see
+     postfix-architecture.md §7)
+   - main.cf/master.cf changes (rare — e.g. changing which upstream
+     accounts exist enough to add/remove a distinct TLS policy):
+     `postfix reload` (never a hard restart, which would drop the
+     queue's in-memory state unnecessarily)
+        │
+        ▼
+config_generations row recorded: checksum, validation result,
+whether applied — every generation is auditable and the previous
+generation is retained on disk for rollback
+```
+
+This gives the "previous valid configuration remains active if the new one
+fails validation" guarantee required by spec §10 for free: nothing is
+overwritten until validation has already succeeded.
+
+## 6. Docker topology
+
+```text
+docker compose
+│
+├── app        FastAPI + built React SPA, owns the SQLite DB,
+│              writes generated config into a shared volume,
+│              exposes the admin web UI (and a small internal API
+│              the "postfix" container never needs to call — the
+│              relationship is one-directional: app writes, postfix
+│              reads).
+│
+├── postfix    Custom minimal image (Debian + postfix package +
+│              libsasl2-modules), mounts the shared config volume
+│              read-only where possible, exposes 587 (submission)
+│              to internal networks only.
+│
+└── postgres   OPTIONAL. Only present if DATABASE_URL is pointed at
+               Postgres instead of the default SQLite file. Not part
+               of the default compose file.
+```
+
+No separate queue-viewer, log-shipper, or SASL container. `postqueue`,
+`mailq`, and `postsuper` are invoked by `app` (via a small privileged helper
+inside the shared volume boundary — see
+[security-model.md](security-model.md) §6) rather than built as a second
+queue implementation.
+
+## 7. Health checks
+
+Per spec §28, the health endpoint must reflect actual capability, not just
+process liveness:
+
+- database reachable (a real query, not just "process is up")
+- Postfix process running (checked via the shared volume / a lightweight
+  signal file the postfix container updates, since containers don't share a
+  process namespace by default)
+- last generated configuration's validation result was a pass
+- generated maps exist and are newer than the DB's last relevant change
+  (detects "generation succeeded but was never applied" drift)
+
+## 8. CLI
+
+A `relay` CLI (a Typer app reusing the same service layer as the API) ships
+in the `app` image so the system stays manageable if the web UI is down:
+
+```text
+relay doctor            # runs the health checks above, human-readable
+relay validate-config   # runs the generator in dry-run mode
+relay generate-config   # forces a regeneration + apply
+relay test-upstream ID  # runs the same test-connection logic as the UI
+relay queue             # lists the Postfix queue (wraps postqueue -p)
+```
+
+## 9. Major decisions and tradeoffs
+
+| Decision | Alternative considered | Why this one |
+|---|---|---|
+| SQLite default | Postgres default | Homelab/small-business scale (spec explicitly allows SQLite); simpler backup story; Postgres remains a documented upgrade. |
+| Cyrus SASL / sasldb2 | Dovecot SASL | Avoids a fourth container for pure auth; accepted the plaintext-equivalent-secret tradeoff and documented it. |
+| One sender → one upstream account | Many-to-many senders↔upstream | Spec's stated default assumption; matches the real-world model (one mailbox, one set of credentials) and keeps `sender_dependent_relayhost_maps` a simple 1:1 lookup. Revisit only if a real use case needs upstream failover per sender. |
+| App never restarts Postfix, only reloads | Always restart | Reload preserves the in-flight queue and active connections; restart is never required for data-driven changes, only for Postfix version upgrades (an operator action, not something the app triggers). |
+| React + Vite SPA served by FastAPI | Server-rendered templates | Needed for Claude Design compatibility (Phase 4) and for a genuinely interactive admin UI (live status, permission matrices, log filtering). |
+
+## 10. Open questions for review
+
+- Confirm the one-sender-to-one-upstream-account default is acceptable long
+  term, or whether upstream failover per sender should be designed in now
+  (schema change is small now, larger later).
+- Confirm SQLite is acceptable as the shipped default even though the user
+  may eventually run this alongside other services that already use Postgres.
+- Confirm Cyrus SASL/sasldb2 is acceptable given the plaintext-equivalent
+  secret tradeoff (see [security-model.md](security-model.md) §4) versus
+  adding Dovecot as a fourth container.
