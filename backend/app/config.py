@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     encryption_key: str | None = None
     encryption_key_file: str | None = None
 
+    # Unix domain socket for the Postfix container's control surface
+    # (security-model.md §6) — the only channel `app` uses to mutate
+    # sasldb2 or install generated Postfix config. Never a network socket.
+    postfix_control_socket: str = "/shared-config/control.sock"
+    postfix_control_timeout: float = 15.0
+
+    # What local SMTP users are told to configure their services with
+    # (the "Connection Details" view, claude-design-prompt.md's Local SMTP
+    # Users screen) — this relay's own submission endpoint, not anything
+    # upstream-provider-related.
+    submission_host: str = "smtp-relay.internal"
+    submission_port: int = 587
+
 
 @lru_cache
 def get_settings() -> Settings:

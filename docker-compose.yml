@@ -5,12 +5,19 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - app_data:/data
-      - relay_config:/shared-config # unused functionally this stage — wired ahead of Stage 4
+      # Read-only from app's side: the control socket lives here (app
+      # connects to it), but app never writes files here directly — every
+      # config/sasldb2 mutation goes through the control surface RPC
+      # (security-model.md §6), enforced in code and, defense-in-depth,
+      # by this mount flag.
+      - relay_config:/shared-config:ro
     ports:
       - "8000:8000"
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
       RELAY_COOKIE_SECURE: "true"
+      RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
+      RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
       # From the shell environment or a .env file next to this file — see
       # .env.example. Never given a value here directly.
       RELAY_ENCRYPTION_KEY: ${RELAY_ENCRYPTION_KEY:-}
@@ -22,7 +29,15 @@ services:
     build:
       context: ./postfix
     volumes:
-      - relay_config:/etc/postfix/relay:ro
+      - relay_config:/etc/postfix/relay
+    environment:
+      # Must match app's RELAY_SUBMISSION_HOST exactly — it's the SASL
+      # realm saslpasswd2 stores credentials under, and has to agree with
+      # main.cf's myhostname (smtpd_sasl_local_domain is empty, so Postfix
+      # falls back to $myhostname as the realm — postfix-architecture.md §5).
+      RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
+    ports:
+      - "587:587"
 
 volumes:
   app_data:

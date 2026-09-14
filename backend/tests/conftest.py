@@ -72,3 +72,24 @@ def csrf_headers(client: TestClient) -> dict[str, str]:
     token = client.cookies.get("csrf_token")
     assert token, "no csrf_token cookie set — was the client logged in first?"
     return {"x-csrf-token": token}
+
+
+@pytest.fixture()
+def fake_postfix_control(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Local SMTP user routes call app.core.postfix_control's sasl_*
+    functions, which normally talk to a real Unix socket inside the
+    postfix container (security-model.md §6). Route-level tests don't
+    stand up a real control surface — they patch these two functions and
+    record calls, the same way test_upstream_accounts_routes.py patches
+    test_upstream_connection. The wire protocol itself is exercised
+    separately in test_postfix_control.py."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        "app.core.postfix_control.sasl_set_user",
+        lambda username, password: calls.append(("set", username, password)),
+    )
+    monkeypatch.setattr(
+        "app.core.postfix_control.sasl_delete_user",
+        lambda username: calls.append(("delete", username)),
+    )
+    return calls

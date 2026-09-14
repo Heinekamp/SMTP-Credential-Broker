@@ -16,6 +16,8 @@ COPY backend/pyproject.toml ./
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
+COPY backend/entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 
 RUN pip install --no-cache-dir -e .
 
@@ -28,7 +30,7 @@ VOLUME ["/data"]
 
 EXPOSE 8000
 
-# Runs the (currently: 0001 baseline + 0002 core data model) migration
-# chain on every boot, per architecture.md's "normal upgrades are
-# docker compose pull && up -d, no manual Postfix/DB steps" requirement.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Runs migrations, then a best-effort initial config generation, then the
+# API — see entrypoint.sh. Normal upgrades stay `docker compose pull && up
+# -d`, no manual Postfix/DB steps (architecture.md).
+ENTRYPOINT ["./entrypoint.sh"]

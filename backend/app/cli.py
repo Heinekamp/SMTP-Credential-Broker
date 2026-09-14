@@ -3,7 +3,9 @@ import os
 
 import typer
 
+from app.core.config_generator import generate_and_apply
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
+from app.core.postfix_control import PostfixControlError
 from app.core.security import hash_password
 from app.core.test_connection import test_upstream_connection
 from app.db.session import SessionLocal
@@ -73,6 +75,47 @@ def test_upstream(account_id: int = typer.Argument(..., help="Upstream account I
         for step in result.steps:
             typer.echo(f"[{'PASS' if step.passed else 'FAIL'}] {step.name}: {step.detail}")
         if not result.success:
+            raise typer.Exit(code=1)
+    finally:
+        db.close()
+
+
+@cli.command("validate-config")
+def validate_config() -> None:
+    """Renders the desired Postfix config from current DB state without
+    installing anything — a pure dry run, safe to run anytime (spec §27)."""
+    db = SessionLocal()
+    try:
+        outcome = generate_and_apply(db, triggered_by_admin_id=None, dry_run=True)
+        typer.echo(outcome.validation_detail)
+        for warning in outcome.warnings:
+            typer.echo(f"WARNING: {warning}")
+    finally:
+        db.close()
+
+
+@cli.command("generate-config")
+def generate_config() -> None:
+    """Runs the full architecture.md §5 pipeline: render, validate,
+    atomically install, and reload only if main.cf/master.cf changed.
+    This is the same operation the Settings UI's "regenerate" action (and
+    every senders/local-users/permissions mutation, in later stages) would
+    trigger, exposed here so the relay is manageable without the web UI."""
+    db = SessionLocal()
+    try:
+        try:
+            outcome = generate_and_apply(db, triggered_by_admin_id=None)
+        except PostfixControlError as exc:
+            typer.echo(f"Could not reach the Postfix control surface: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        typer.echo(f"Generation #{outcome.generation_id}: {'PASS' if outcome.success else 'FAIL'}")
+        if outcome.validation_detail:
+            typer.echo(outcome.validation_detail)
+        for warning in outcome.warnings:
+            typer.echo(f"WARNING: {warning}")
+        typer.echo(f"Reloaded: {outcome.reloaded}")
+        if not outcome.success:
             raise typer.Exit(code=1)
     finally:
         db.close()

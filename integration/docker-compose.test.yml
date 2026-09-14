@@ -1,0 +1,51 @@
+# Integration test harness (testing-strategy.md §2). Brings up the real
+# app + postfix images (same Dockerfiles as production) plus a controlled
+# upstream-stub SMTP server, all on an isolated network reachable from the
+# host at fixed ports so pytest (run on the host, or in a CI job) can drive
+# real SMTP sessions and real API calls.
+#
+# Run from the repo root:
+#   docker compose -f integration/docker-compose.test.yml up -d --build
+#   pip install -r integration/requirements.txt
+#   pytest integration/
+#   docker compose -f integration/docker-compose.test.yml down -v
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    volumes:
+      - relay_config_test:/shared-config:ro
+    environment:
+      RELAY_DATABASE_URL: sqlite:////data/app.db
+      RELAY_COOKIE_SECURE: "false"
+      # Fixed, test-only key — base64("test-key-32-bytes-for-int-tests").
+      # Never use a fixed key outside this throwaway test harness.
+      RELAY_ENCRYPTION_KEY: dGVzdC1rZXktMzItYnl0ZXMtZm9yLWludC10ZXN0cw==
+      RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
+      RELAY_SUBMISSION_HOST: relay-test.internal
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postfix
+
+  postfix:
+    build:
+      context: ../postfix
+    volumes:
+      - relay_config_test:/etc/postfix/relay
+    environment:
+      RELAY_SUBMISSION_HOST: relay-test.internal
+    ports:
+      - "1587:587" # submission — what the test suite's SMTP clients connect to
+      - "1025:25" # plain smtp — used only by the open-relay-prevention test
+
+  upstream-stub:
+    build:
+      context: ./upstream_stub
+    ports:
+      - "2526:2526" # inspection HTTP API for the test suite
+
+volumes:
+  relay_config_test:
