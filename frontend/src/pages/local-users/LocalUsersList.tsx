@@ -1,0 +1,224 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { Button, Card, Switch } from "../../design-system/components";
+import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
+import { ConfirmModal } from "../../components/ConfirmModal";
+import { relativeTime } from "../../lib/relativeTime";
+import {
+  deleteLocalUser,
+  deleteLocalUserPrecheck,
+  listLocalUsers,
+  regenerateLocalUserPassword,
+  updateLocalUser,
+  type LocalUser,
+} from "../../lib/api/localUsers";
+
+const QUERY_KEY = ["local-users"];
+
+export function LocalUsersList() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: users, isLoading, isError } = useQuery({ queryKey: QUERY_KEY, queryFn: listLocalUsers });
+
+  const [disableTarget, setDisableTarget] = useState<LocalUser | null>(null);
+  const [regenerateTarget, setRegenerateTarget] = useState<LocalUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LocalUser | null>(null);
+  const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
+
+  const toggleEnabled = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateLocalUser(id, { enabled }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      // Re-enabling issues a fresh credential (no plaintext to restore) —
+      // the response carries it once, same as create/regenerate.
+      if (result.password) {
+        navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
+      }
+    },
+  });
+
+  const regenerate = useMutation({
+    mutationFn: (id: number) => regenerateLocalUserPassword(id),
+    onSuccess: (result, id) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setRegenerateTarget(null);
+      navigate(`/local-users/${id}/reveal`, { state: { password: result.password } });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) => deleteLocalUser(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setDeleteTarget(null);
+      setDeletePrecheck(null);
+    },
+  });
+
+  async function openDeleteModal(user: LocalUser) {
+    const precheck = await deleteLocalUserPrecheck(user.id);
+    setDeleteTarget(user);
+    setDeletePrecheck(precheck.allowed_sender_addresses);
+  }
+
+  return (
+    <div style={{ maxWidth: 1200 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <h1 style={{ fontSize: "var(--text-lg)", fontWeight: 600, margin: 0 }}>Local SMTP Users</h1>
+        <Button variant="accent" onClick={() => navigate("/local-users/new")}>
+          + Add Local SMTP User
+        </Button>
+      </div>
+
+      {isLoading && (
+        <Card>
+          <div style={skeletonBarStyle} />
+          <div style={skeletonBarStyle} />
+          <div style={skeletonBarStyle} />
+        </Card>
+      )}
+
+      {isError && (
+        <Card style={{ borderLeft: "3px solid var(--status-fault)" }}>
+          <p style={{ margin: 0, fontWeight: 600 }}>Couldn't load local SMTP users.</p>
+          <p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+            This is a connectivity/API issue, not a sign that there's no data.
+          </p>
+        </Card>
+      )}
+
+      {users && users.length === 0 && (
+        <Card style={{ maxWidth: 480, textAlign: "center" }}>
+          <p style={{ color: "var(--text-muted)" }}>
+            No local SMTP users yet. Issue scoped credentials for internal services here.
+          </p>
+          <Button variant="accent" onClick={() => navigate("/local-users/new")}>
+            + Add Local SMTP User
+          </Button>
+        </Card>
+      )}
+
+      {users && users.length > 0 && (
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              {["Name", "Username", "Status", "Password Changed", "Allowed Senders", "Actions"].map((label) => (
+                <th key={label} style={thStyle}>
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>{user.name}</td>
+                <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+                  {user.username}
+                </td>
+                <td style={tdStyle}>
+                  <Switch
+                    checked={user.enabled}
+                    onChange={(checked) => {
+                      if (checked) {
+                        toggleEnabled.mutate({ id: user.id, enabled: true });
+                      } else {
+                        setDisableTarget(user);
+                      }
+                    }}
+                  />
+                </td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>
+                  {user.password_last_rotated_at ? relativeTime(user.password_last_rotated_at) : "—"}
+                </td>
+                <td style={tdStyle}>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/local-users/${user.id}/permissions`)}
+                    style={linkButtonStyle}
+                  >
+                    {user.allowed_sender_count} allowed
+                  </button>
+                </td>
+                <td style={tdStyle}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Button variant="default" onClick={() => navigate(`/local-users/${user.id}/permissions`)}>
+                      Permissions
+                    </Button>
+                    <Button variant="default" onClick={() => navigate(`/local-users/${user.id}/connection-details`)}>
+                      Connection Details
+                    </Button>
+                    <Button variant="warn" onClick={() => setRegenerateTarget(user)}>
+                      Regenerate
+                    </Button>
+                    <Button variant="danger" onClick={() => openDeleteModal(user)}>
+                      Delete
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {disableTarget && (
+        <ConfirmModal
+          title={`Disable "${disableTarget.name}"?`}
+          body="This credential will stop authenticating immediately until it is re-enabled."
+          confirmLabel="Disable"
+          variant="danger"
+          confirming={toggleEnabled.isPending}
+          onCancel={() => setDisableTarget(null)}
+          onConfirm={() => {
+            toggleEnabled.mutate({ id: disableTarget.id, enabled: false }, { onSuccess: () => setDisableTarget(null) });
+          }}
+        />
+      )}
+
+      {regenerateTarget && (
+        <ConfirmModal
+          title={`Regenerate password for "${regenerateTarget.name}"?`}
+          body="This invalidates the current credential immediately. The service using it will be unable to send until it is reconfigured with the new password."
+          confirmLabel="Regenerate"
+          variant="warn"
+          confirming={regenerate.isPending}
+          onCancel={() => setRegenerateTarget(null)}
+          onConfirm={() => regenerate.mutate(regenerateTarget.id)}
+        />
+      )}
+
+      {deleteTarget && deletePrecheck && (
+        <ConfirmModal
+          title={`Delete "${deleteTarget.name}"?`}
+          body={
+            deletePrecheck.length === 0
+              ? "This credential will stop authenticating immediately. It wasn't allowed to use any senders."
+              : `This credential will stop authenticating immediately. It was allowed to use: ${deletePrecheck.join(", ")}`
+          }
+          confirmLabel="Delete"
+          variant="danger"
+          confirming={remove.isPending}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeletePrecheck(null);
+          }}
+          onConfirm={() => remove.mutate(deleteTarget.id)}
+        />
+      )}
+    </div>
+  );
+}
+
+const linkButtonStyle = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  color: "var(--brand-green)",
+  cursor: "pointer",
+  fontSize: "var(--text-sm)",
+  fontFamily: "var(--font-ui)",
+  textDecoration: "underline",
+};

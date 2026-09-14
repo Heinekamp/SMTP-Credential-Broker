@@ -1,6 +1,6 @@
-import type { ChangeEvent, CSSProperties, ReactNode } from "react";
+import type { ChangeEvent, CSSProperties, ReactNode, SelectHTMLAttributes } from "react";
 
-export interface SelectProps {
+export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "style"> {
   value?: string | number;
   onChange?: (e: ChangeEvent<HTMLSelectElement>) => void;
   children: ReactNode;
@@ -10,7 +10,9 @@ export interface SelectProps {
 
 // Ported from design-system/components-reference/core/select/Select.jsx —
 // a plain native dropdown styled to match Button/TextInput's control look.
-export function Select({ value, onChange, children, style, disabled }: SelectProps) {
+// Extends the reference with a passthrough for standard attributes (id,
+// name, required, aria-*) so callers can label it properly.
+export function Select({ value, onChange, children, style, disabled, ...rest }: SelectProps) {
   return (
     <select
       value={value}
@@ -27,6 +29,7 @@ export function Select({ value, onChange, children, style, disabled }: SelectPro
         opacity: disabled ? 0.4 : 1,
         ...style,
       }}
+      {...rest}
     >
       {children}
     </select>

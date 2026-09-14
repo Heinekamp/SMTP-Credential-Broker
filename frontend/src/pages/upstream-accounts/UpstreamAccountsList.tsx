@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, StatusBadge, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { parseApiDate } from "../../lib/apiDate";
 import {
   deleteUpstreamAccount,
   deleteUpstreamAccountPrecheck,
@@ -129,7 +130,7 @@ export function UpstreamAccountsList() {
                     <StatusBadge status={lastTest.status} label={lastTest.label} size="sm" />
                     {account.last_test_at && (
                       <div style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 2 }}>
-                        {new Date(account.last_test_at).toLocaleString()}
+                        {parseApiDate(account.last_test_at).toLocaleString()}
                       </div>
                     )}
                   </td>

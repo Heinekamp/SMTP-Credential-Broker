@@ -6,6 +6,7 @@ import { AppShell } from "./components/AppShell";
 import { ComingSoon } from "./pages/ComingSoon";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
+import { LocalUsersRoutes } from "./pages/local-users";
 import { SendersRoutes } from "./pages/senders";
 import { UpstreamAccountsRoutes } from "./pages/upstream-accounts";
 import { fetchSetupRequired } from "./lib/api/setup";
@@ -51,7 +52,7 @@ export function App() {
         <Route path="/" element={<ComingSoon title="Dashboard" />} />
         <Route path="/upstream-accounts/*" element={<UpstreamAccountsRoutes />} />
         <Route path="/senders/*" element={<SendersRoutes />} />
-        <Route path="/local-users/*" element={<ComingSoon title="Local SMTP Users" />} />
+        <Route path="/local-users/*" element={<LocalUsersRoutes />} />
         <Route path="/mail-log" element={<ComingSoon title="Mail Log" />} />
         <Route path="/queue" element={<ComingSoon title="Queue" />} />
         <Route path="/settings" element={<ComingSoon title="Settings" />} />

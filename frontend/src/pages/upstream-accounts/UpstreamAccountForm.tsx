@@ -83,17 +83,18 @@ export function UpstreamAccountForm() {
         </div>
       )}
       <form onSubmit={submit}>
-        <label style={labelStyle}>Name</label>
-        <TextInput value={name} onChange={(e) => setName(e.target.value)} style={fieldStyle} required />
+        <label style={labelStyle} htmlFor="ua-name">Name</label>
+        <TextInput id="ua-name" value={name} onChange={(e) => setName(e.target.value)} style={fieldStyle} required />
 
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 2 }}>
-            <label style={labelStyle}>Host</label>
-            <TextInput value={host} onChange={(e) => setHost(e.target.value)} style={fieldStyle} required />
+            <label style={labelStyle} htmlFor="ua-host">Host</label>
+            <TextInput id="ua-host" value={host} onChange={(e) => setHost(e.target.value)} style={fieldStyle} required />
           </div>
           <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Port</label>
+            <label style={labelStyle} htmlFor="ua-port">Port</label>
             <TextInput
+              id="ua-port"
               type="number"
               value={port}
               onChange={(e) => setPort(e.target.value)}
@@ -103,17 +104,23 @@ export function UpstreamAccountForm() {
           </div>
         </div>
 
-        <label style={labelStyle}>TLS Mode</label>
-        <Select value={tlsMode} onChange={(e) => setTlsMode(e.target.value as TlsMode)} style={{ ...fieldStyle, width: "100%" }}>
+        <label style={labelStyle} htmlFor="ua-tls-mode">TLS Mode</label>
+        <Select
+          id="ua-tls-mode"
+          value={tlsMode}
+          onChange={(e) => setTlsMode(e.target.value as TlsMode)}
+          style={{ ...fieldStyle, width: "100%" }}
+        >
           <option value="starttls">STARTTLS</option>
           <option value="implicit">Implicit TLS</option>
         </Select>
 
-        <label style={labelStyle}>Username</label>
-        <TextInput value={username} onChange={(e) => setUsername(e.target.value)} style={fieldStyle} required />
+        <label style={labelStyle} htmlFor="ua-username">Username</label>
+        <TextInput id="ua-username" value={username} onChange={(e) => setUsername(e.target.value)} style={fieldStyle} required />
 
-        <label style={labelStyle}>Password</label>
+        <label style={labelStyle} htmlFor="ua-password">Password</label>
         <TextInput
+          id="ua-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

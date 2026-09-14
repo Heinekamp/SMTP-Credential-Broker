@@ -29,8 +29,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   }
 
   const response = await fetch(path, { ...options, method, headers, credentials: "include" });
+  // A 204 (every DELETE/PUT-permission endpoint in this app) has no body,
+  // but FastAPI still sends a `Content-Type: application/json` header —
+  // response.json() on that empty body throws "Unexpected end of JSON
+  // input". Reading the raw text first and only parsing it when non-empty
+  // handles that regardless of status code, rather than special-casing 204.
   const isJson = response.headers.get("content-type")?.includes("application/json") ?? false;
-  const body = isJson ? await response.json() : undefined;
+  const text = await response.text();
+  const body = isJson && text ? JSON.parse(text) : undefined;
 
   if (!response.ok) {
     throw new ApiError(response.status, body?.detail ?? body);

@@ -70,11 +70,12 @@ export function SenderForm() {
         </div>
       )}
       <form onSubmit={submit}>
-        <label style={labelStyle}>Address</label>
-        <TextInput value={address} onChange={(e) => setAddress(e.target.value)} style={fieldStyle} required />
+        <label style={labelStyle} htmlFor="sender-address">Address</label>
+        <TextInput id="sender-address" value={address} onChange={(e) => setAddress(e.target.value)} style={fieldStyle} required />
 
-        <label style={labelStyle}>Upstream Account</label>
+        <label style={labelStyle} htmlFor="sender-upstream-account">Upstream Account</label>
         <Select
+          id="sender-upstream-account"
           value={upstreamAccountId}
           onChange={(e) => setUpstreamAccountId(Number(e.target.value))}
           style={{ ...fieldStyle, width: "100%" }}
