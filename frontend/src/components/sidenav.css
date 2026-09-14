@@ -1,0 +1,20 @@
+/* Design handoff §3: below 900px, sidenav labels hide and the column
+   collapses to 56px (icon-only) — the one place the design needs a real
+   media query rather than an inline style. */
+.relay-sidenav {
+  width: 200px;
+}
+
+.relay-sidenav-label {
+  display: inline;
+}
+
+@media (max-width: 900px) {
+  .relay-sidenav {
+    width: 56px;
+  }
+
+  .relay-sidenav-label {
+    display: none;
+  }
+}
