@@ -1,4 +1,7 @@
+import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -17,12 +20,35 @@ from app.api.routes import (
     system,
     upstream_accounts,
 )
+from app.config import get_settings
 from app.core.logging_config import configure_logging
 from app.core.request_context import set_request_id
+from app.core.scheduled_tests import connection_test_tick
+from app.core.scheduler import run_periodic
 
 configure_logging()
 
-app = FastAPI(title="Managed SMTP Relay")
+# Real background work polls every 60s; each tick() decides for itself
+# whether enough time has actually elapsed to do anything (settings_store-
+# backed), so this interval is just how quickly an admin-edited setting
+# takes effect, not how often real work happens.
+_POLL_SECONDS = 60
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    tasks: list[asyncio.Task] = []
+    if get_settings().scheduler_enabled:
+        tasks = [
+            asyncio.create_task(run_periodic("connection_test", _POLL_SECONDS, connection_test_tick)),
+        ]
+    yield
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+app = FastAPI(title="Managed SMTP Relay", lifespan=lifespan)
 
 
 @app.middleware("http")

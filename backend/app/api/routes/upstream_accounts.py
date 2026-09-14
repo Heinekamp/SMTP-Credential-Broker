@@ -4,11 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
 from app.core.audit import client_ip, record_audit
-from app.core.clock import utcnow
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret, encrypt_secret
 from app.core.test_connection import test_upstream_connection
+from app.core.upstream_testing import apply_test_result
 from app.models.admin import AdminUser
-from app.models.enums import TestResult
 from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 from app.schemas.upstream import (
@@ -186,13 +185,7 @@ def test_connection(account_id: int, db: Session = Depends(get_db)) -> TestConne
         password=password,
     )
 
-    account.last_test_at = utcnow()
-    account.last_test_result = TestResult.success if result.success else TestResult.failure
-    account.last_test_error = (
-        None
-        if result.success
-        else "; ".join(f"{step.name}: {step.detail}" for step in result.steps if not step.passed)
-    )
+    apply_test_result(account, result)
     db.commit()
 
     return TestConnectionResponse(

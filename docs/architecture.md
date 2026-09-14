@@ -231,6 +231,26 @@ health, so a plain `curl --fail` liveness probe (this project's own
 can still inspect per-check detail. `relay doctor` runs the identical
 check battery, human-readable, and exits non-zero when actually unhealthy.
 
+## 7a. Background scheduler
+
+`app/core/scheduler.py` is a stdlib-`asyncio`-only periodic-task runner
+(no new dependency), started from `main.py`'s FastAPI `lifespan` and gated
+on `RELAY_SCHEDULER_ENABLED` (default true; tests set this false so a
+`TestClient`'s lifespan never spins up real background tasks against a
+schema-less database). It polls every 60 seconds; each individual job's
+`tick()` function decides for itself, via `relay_settings`/
+`background_job_state` (database-schema.md §10-11), whether enough
+wall-clock time has actually elapsed to do real work — this lets an
+admin-edited interval take effect within one poll window, no restart
+needed. One bad tick is caught and logged, never crashes the loop.
+
+The first job wired in is scheduled upstream connection testing
+(`app/core/scheduled_tests.py`): re-runs the same diagnostic as the manual
+"Test Connection" button against every enabled upstream account, on an
+admin-configurable interval that defaults to `NULL` (disabled/manual-only)
+so upgrading an existing instance never silently starts periodic AUTH
+attempts against a real provider without opt-in.
+
 ## 8. CLI
 
 A `relay` CLI (a Typer app reusing the same service layer as the API) ships
