@@ -25,6 +25,7 @@ _CREDENTIALS = {
     "printer@example.com": os.environ.get("STUB_PRINTER_PASSWORD", "printer-upstream-pass"),
     "noreply@example.com": os.environ.get("STUB_NOREPLY_PASSWORD", "noreply-upstream-pass"),
     "server@example.com": os.environ.get("STUB_SERVER_PASSWORD", "server-upstream-pass"),
+    "alerts@example.com": os.environ.get("STUB_ALERTS_PASSWORD", "alerts-upstream-pass"),
 }
 
 # Deliveries the test suite can assert against: (auth_username, mail_from, rcpt_tos)

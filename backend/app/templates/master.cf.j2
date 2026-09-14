@@ -9,8 +9,14 @@
 # service type  private unpriv  chroot  wakeup  maxproc command + args
 #               (yes)   (yes)   (no)    (never) (100)
 # ==========================================================================
-smtp      inet  n       -       n       -       -       smtpd
-  -o inet_interfaces=loopback-only
+{#- A per-service `-o inet_interfaces=loopback-only` override does NOT
+   restrict this service's own listener bind — inet_interfaces controls
+   master's socket bind and isn't one of the parameters master re-reads
+   per service the way smtpd-level parameters are (confirmed by testing:
+   the override was silently ignored and port 25 stayed reachable from
+   outside). Binding a specific address is instead done by putting it
+   directly in the service-name column. #}
+127.0.0.1:smtp inet n  -       n       -       -       smtpd
 submission inet n       -       n       -       -       smtpd
   -o syslog_name=postfix/submission
   -o smtpd_tls_security_level=encrypt
@@ -44,3 +50,8 @@ virtual   unix  -       n       n       -       -       virtual
 lmtp      unix  -       -       n       -       -       lmtp
 anvil     unix  -       -       n       -       1       anvil
 scache    unix  -       -       n       -       1       scache
+{#- Required since Postfix 3.4 whenever maillog_file is set (main.cf.j2) —
+   without it, `postfix start`'s own integrity check refuses to start at
+   all ("missing 'postlog' service in master.cf"). Found by hitting that
+   exact fatal error against a real Postfix instance. #}
+postlog   unix-dgram n  -       n       -       1       postlogd

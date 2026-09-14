@@ -60,6 +60,14 @@ is STRATO-specific in the generated configuration.
 ## 2. Generated `main.cf` (relay-relevant subset)
 
 ```ini
+# ── Logging ──────────────────────────────────────────────────────────
+# The postfix container has no syslog daemon; without this, every Postfix
+# log line — including fatal startup/reload errors — silently vanishes
+# instead of reaching `docker logs`. Requires a matching `postlog` service
+# entry in master.cf (§3) on Postfix 3.4+; found the hard way when its
+# absence made `postfix start` refuse to start at all.
+maillog_file = /dev/stdout
+
 # ── Identity / posture ──────────────────────────────────────────────
 myhostname = relay.internal.example.net
 mydomain = internal.example.net
@@ -183,6 +191,7 @@ relayhost =
 ## 3. Generated `master.cf` (submission service)
 
 ```text
+127.0.0.1:smtp inet n  -       n       -       -       smtpd
 submission inet n       -       n       -       -       smtpd
   -o syslog_name=postfix/submission
   -o smtpd_tls_security_level=encrypt
@@ -192,13 +201,26 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject_unauth_destination
   -o milter_macro_daemon_name=ORIGINATING
+...
+postlog   unix-dgram n  -       n       -       1       postlogd
 ```
 
 Only the submission service (port 587) is exposed to internal networks. The
-plain port-25 `smtpd` service is left bound to loopback only (its default
-`main.cf`-level restrictions apply, but nothing internal is expected to ever
-reach it) — this relay's job is *submission*, not accepting arbitrary
-port-25 SMTP.
+plain port-25 `smtpd` service is bound to loopback only, via
+`127.0.0.1:smtp` as the service's own listen address — **not** a per-service
+`-o inet_interfaces=loopback-only` override, which was the first thing tried
+and doesn't work: `inet_interfaces` controls the socket bind master(8)
+performs once at its own startup, not a parameter individual services
+re-read the way `smtpd_*` overrides work, so the override was silently
+ignored and port 25 stayed reachable in testing. Binding a specific address
+to one service means writing it directly in the service-name column instead.
+
+The trailing `postlog unix-dgram ...` entry is required by Postfix 3.4+
+whenever `maillog_file` is set (§2) — without it, `postfix start` refuses to
+start at all with "missing 'postlog' service in master.cf." The full
+generated `master.cf` also includes Postfix's own standard service stanzas
+(`pickup`, `cleanup`, `qmgr`, `smtp` (outbound), `bounce`, etc.) unmodified —
+this document only shows the relay-specific portions.
 
 ## 4. Generated lookup maps (source files, before `postmap`)
 
@@ -266,9 +288,28 @@ called out because it's the single most common cause of "valid-looking
 credentials that Postfix rejects anyway" in Cyrus SASL setups, and is worth a
 maintainer knowing on day one rather than rediscovering via trial and error.
 
-`/etc/sasldb2` is owned by root, mode `0640`, group-readable only by the
-`postfix`/`sasl` group inside the `postfix` container — see
-[security-model.md](security-model.md) §4 for the full threat-model
+`/etc/sasldb2` is created by `sasl2-bin` as `root:sasl`, mode `0660`. Two
+things have to be true for `smtpd` (running as user/group `postfix`) to
+actually be able to use it — both silent until an actual `AUTH` attempt,
+both found only by testing against a real instance, both baked into the
+postfix image at build time rather than left as a runtime surprise:
+
+1. The `postfix` system user must be a member of the `sasl` group
+   (`adduser postfix sasl`) — without it, `smtpd` can open the file's
+   directory entry but not read its contents, and every AUTH fails with a
+   generic `454 4.7.0 Temporary authentication failure`, not a permission
+   error pointing at the real cause.
+2. Cyrus SASL's `smtpd` service needs `/usr/lib/sasl2/smtpd.conf` telling
+   it which auxprop plugin to consult at all:
+   ```
+   pwcheck_method: auxprop
+   auxprop_plugin: sasldb
+   mech_list: PLAIN LOGIN
+   ```
+   Without this file, nothing points the library at `sasldb`/`/etc/sasldb2`
+   in the first place, and every AUTH fails with that same generic error.
+
+See [security-model.md](security-model.md) §4 for the full threat-model
 discussion of this being the one place a plaintext-equivalent secret must
 exist outside the encrypted database.
 
@@ -292,7 +333,24 @@ authenticates with its own local SMTP user and is bound by that user's
 | Add/edit an upstream account or change which upstream a sender uses | `sender_relayhost` + `sasl_passwd` sources + `.lmdb`s | **None**, same reason. |
 | Rotate an upstream account's password | `sasl_passwd` source + `.lmdb` only | **None.** `sender_login` and `sender_relayhost` are untouched — this is why credential rotation never affects local users' credentials (spec §25's rotation test). |
 | Add/remove a local SMTP user | `sasldb2` entry (via `saslpasswd2`) + `sender_login` (if permissions changed too) | **None** for `sasldb2` — the SASL library reads it per-authentication-attempt, not cached at process start. |
-| Change `myhostname`, add a new TLS certificate, or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix reload` (never a hard restart — reload keeps the queue and in-flight connections intact; `postfix.org`'s own guidance is that config file edits only need `reload`, and even that isn't required for pure lookup-table changes). |
+| Change `myhostname`, add a new TLS certificate, or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix stop` + `postfix start` — see the note below on why this is a restart, not `postfix reload`. |
+
+**Why a restart, not `reload`.** The original design here (and `postfix.org`'s
+own general guidance) was that a `main.cf`/`master.cf` change only needs
+`postfix reload` (SIGHUP), never a full restart, since reload is supposed to
+keep the on-disk queue and any accepted-but-not-yet-processed connections
+intact. In practice, against a real Postfix 3.7 instance in this project's
+Docker deployment, `postfix reload` **reproducibly crashed the master
+process** on the second and later config change — every time, regardless of
+whether Postfix ran as the container's PID 1 (`start-fg`) or as a normal
+detached daemon (`postfix start`). A cold `postfix stop` followed by
+`postfix start` with the exact same config never had this problem, across
+repeated clean test runs. The queue itself is unaffected either way (it's
+on-disk under `/var/spool/postfix`, not held in master's memory) — the only
+real cost of a restart over a reload is a brief window (observed: well under
+a second) where the submission port isn't accepting new connections. See
+`integration/README.md` for the full list of what real end-to-end testing
+against Postfix caught, including this one.
 
 Every regeneration — whether or not it results in an `apply` step — is
 validated first (`postconf -c <tmp>`; `postmap` against each source file) and
@@ -309,8 +367,12 @@ An unauthenticated client cannot relay because:
    `AUTH` exchange.
 2. Even if it tries a `MAIL FROM` using an address that happens to be one of
    our senders, `reject_unauthenticated_sender_login_mismatch` (part of
-   `reject_sender_login_mismatch`) rejects it during the `MAIL FROM` stage,
-   before relay is even considered.
+   `reject_sender_login_mismatch`, configured in `smtpd_sender_restrictions`)
+   condemns it — though, because Postfix defers restriction evaluation by
+   default (`smtpd_delay_reject = yes`), the client sees `MAIL FROM` itself
+   answered `250` and only gets the actual `553` rejection at the following
+   `RCPT TO` (confirmed against a real Postfix instance — see
+   `integration/README.md`). The message is still never accepted for relay.
 3. `mynetworks` is loopback-only, so there is no IP range from which either
    restriction is bypassed.
 

@@ -12,10 +12,15 @@ FROM debian:bookworm-slim
 # real generated config the first time `relay generate-config` runs
 # (postfix-architecture.md §7 — this is the same "app writes, postfix
 # applies" pipeline, not a one-time image-build step).
+# `lmdb`-backed lookup tables (postfix-architecture.md §4) need the
+# separate postfix-lmdb package — Debian splits every non-default map
+# backend out of the base `postfix` package. Discovered via a real
+# `postmap` failure ("unsupported dictionary type: lmdb") on first boot.
 RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         postfix \
+        postfix-lmdb \
         libsasl2-modules \
         sasl2-bin \
         python3 \
@@ -33,6 +38,20 @@ RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-se
 RUN mkdir -p /etc/postfix/tls \
     && openssl req -x509 -newkey rsa:2048 -keyout /etc/postfix/tls/relay.key -out /etc/postfix/tls/relay.crt \
         -days 3650 -nodes -subj "/CN=smtp-relay.internal"
+
+# Two real, silent SASL AUTH failures found by testing against a live
+# Postfix instance, neither of which produces an error until an actual
+# AUTH attempt (both surfaced as a generic "454 4.7.0 Temporary
+# authentication failure"):
+#   1. Cyrus SASL's smtpd service has no config telling it which auxprop
+#      plugin to use, so it never actually consults sasldb2 at all.
+#   2. `saslpasswd2` (sasl2-bin's default) creates /etc/sasldb2 as
+#      root:sasl, mode 660 — but smtpd runs as user/group `postfix`, which
+#      isn't a member of `sasl`, so it can't read the file it needs to
+#      authenticate against.
+RUN mkdir -p /usr/lib/sasl2 \
+    && printf 'pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n' > /usr/lib/sasl2/smtpd.conf \
+    && adduser postfix sasl
 
 COPY control_surface.py /control_surface.py
 COPY entrypoint.sh /entrypoint.sh

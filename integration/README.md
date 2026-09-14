@@ -5,10 +5,13 @@ Drives real SMTP sessions against a real Postfix instance (the actual
 stand-in, per [docs/testing-strategy.md](../docs/testing-strategy.md) §2.
 Every test here corresponds to one of spec §25's mandatory scenarios.
 
-**Status: written, not yet run.** This was built in an environment without
-Docker available, so it has not been executed against a real Postfix
-instance. Run it (and fix whatever the first run inevitably finds) before
-treating Stage 4 as done — see `docs/implementation-plan.md`.
+**Status: verified.** All 9 scenarios pass against a real Docker Desktop +
+real Postfix 3.7 instance, twice in a row from a clean `down -v`/`up -d`
+(not a fluke). Getting here surfaced and fixed several real bugs that no
+amount of unit testing would have caught — see "What this caught" below.
+If you change `postfix/`, `backend/app/templates/`, or
+`backend/app/core/config_generator.py`/`postfix_control.py`, re-run this
+suite before trusting the change.
 
 ## Running it
 
@@ -24,9 +27,10 @@ docker compose -f integration/docker-compose.test.yml down -v
 
 ## What's running
 
-- `app` — the real backend image, submission-agnostic port 8000 exposed to the host.
+- `app` — the real backend image, port 8000 exposed to the host.
 - `postfix` — the real postfix image, submission (587) exposed on host port
-  1587, plain smtp (25) on host port 1025 (used only by the open-relay test).
+  1587, plain smtp (25) on host port 1025 (used only by the open-relay test —
+  it's expected to be unreachable; see below).
 - `upstream-stub` — a throwaway SMTP server (`aiosmtpd`) standing in for an
   externally hosted provider, with an inspection HTTP API on port 2526 so
   the test suite (running on the host) can see what was actually delivered
@@ -36,20 +40,39 @@ docker compose -f integration/docker-compose.test.yml down -v
 All state is test-only and reset with `down -v` — the encryption key used
 here is a fixed, published test value; never reuse it anywhere real.
 
-## Known gaps to check on first run
+## What this caught
 
-- `test_sender_matching_permission_is_accepted_and_mismatch_is_rejected`
-  and the reassignment test detect a `reject_sender_login_mismatch`
-  rejection via `smtplib`'s exception types, but exactly which exception
-  `smtplib` raises for a mid-transaction rejection can depend on timing
-  (some servers reject at `MAIL FROM`, Postfix's `smtpd_sender_restrictions`
-  placement here rejects at that point) — if the first run shows a
-  different exception type or a non-raising 5xx code returned from
-  `rcpt()`, tighten the assertion rather than loosening it away.
-- The relay's self-signed TLS cert (generated at image build time) is
-  trusted here via `ssl.CERT_NONE` on the test client only — this is
-  correct for the test harness and must never be copied into anything
-  that talks to a real deployment.
-- `docker-compose.test.yml`'s `RELAY_SUBMISSION_HOST` must stay identical
-  between the `app` and `postfix` services (it's also the SASL realm) —
-  if you change one, change both.
+Real, non-hypothetical bugs found only by running this against a live
+Postfix instance (all fixed; kept here so the reasoning isn't lost):
+
+- **`postfix reload` (SIGHUP) reproducibly killed the master process** on
+  the second and later config change, regardless of whether Postfix ran as
+  the container's PID 1 (`start-fg`) or as a normal detached daemon
+  (`postfix start`). A cold `postfix stop && postfix start` on the exact
+  same config never had the problem, so `control_surface.py`'s
+  `_apply_config` uses that instead of reload — see its comment for the
+  full story. Also serves as how Postfix gets started on the container's
+  very first boot.
+- **`postfix-lmdb` isn't in the base `postfix` Debian package** — `lmdb`-typed
+  lookup tables need it installed separately, or `postmap` fails with
+  "unsupported dictionary type: lmdb".
+- **`maillog_file = /dev/stdout` needs a `postlog` service entry in
+  master.cf** (Postfix 3.4+) — without it, `postfix start`'s own integrity
+  check refuses to start at all.
+- **Cyrus SASL had no auxprop config** (`/usr/lib/sasl2/smtpd.conf` didn't
+  exist) and **the `postfix` user wasn't in the `sasl` group** that owns
+  `/etc/sasldb2` — both silent until an actual `AUTH` attempt, both
+  surfacing as a generic `454 4.7.0 Temporary authentication failure`.
+- **A per-service `-o inet_interfaces=loopback-only` override in master.cf
+  does not restrict that service's listener** — inet_interfaces is a
+  master-level socket-bind setting, not one master re-reads per service.
+  Binding an address to one service specifically means writing it directly
+  in the service-name column (`127.0.0.1:smtp` instead of `smtp`).
+- **`smtplib`'s low-level `.mail()`/`.rcpt()` don't raise on failure** —
+  only `.sendmail()` does. Two tests were asserting `pytest.raises(...)`
+  around calls that just return a `(code, message)` tuple, so a real,
+  correct `553` rejection from Postfix was going unnoticed by the test
+  itself. Fixed by asserting the returned code directly.
+- **Pydantic's `EmailStr` rejects RFC 2606 reserved TLDs** (`.test`,
+  `.invalid`, `.localhost`) outright — a fixture using `admin@...test`
+  never got past request validation.

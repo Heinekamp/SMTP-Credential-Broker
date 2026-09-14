@@ -140,13 +140,21 @@ Atomic install
         ▼
 Apply
    - map-only changes (sender/permission/upstream edits that don't
-     touch main.cf/master.cf structure): NO reload needed — Postfix
-     detects the changed table file automatically (see
+     touch main.cf/master.cf structure): NO reload/restart needed —
+     Postfix detects the changed table file automatically (see
      postfix-architecture.md §7)
    - main.cf/master.cf changes (rare — e.g. changing which upstream
      accounts exist enough to add/remove a distinct TLS policy):
-     `postfix reload` (never a hard restart, which would drop the
-     queue's in-memory state unnecessarily)
+     `postfix stop` + `postfix start` — see postfix-architecture.md §7
+     for why this is a full restart rather than `postfix reload`
+     (SIGHUP), despite reload being the theoretically lighter-weight
+     option: it reproducibly crashed the master process in real testing
+     against a real Postfix instance, in this project's target
+     deployment environment, while a cold restart with the identical
+     config never did. The in-flight queue is preserved either way
+     (it's on-disk, not in master's memory); a restart only means a
+     brief window (observed: under a second) where the submission port
+     isn't accepting new connections.
         │
         ▼
 config_generations row recorded: checksum, validation result,
@@ -219,7 +227,7 @@ relay queue             # lists the Postfix queue (wraps postqueue -p)
 | SQLite default | Postgres default | Homelab/small-business scale (spec explicitly allows SQLite); simpler backup story; Postgres remains a documented upgrade. |
 | Cyrus SASL / sasldb2 | Dovecot SASL | Avoids a fourth container for pure auth; accepted the plaintext-equivalent-secret tradeoff and documented it. |
 | One sender → one upstream account | Many-to-many senders↔upstream | Spec's stated default assumption; matches the real-world model (one mailbox, one set of credentials) and keeps `sender_dependent_relayhost_maps` a simple 1:1 lookup. Revisit only if a real use case needs upstream failover per sender. |
-| App never restarts Postfix, only reloads | Always restart | Reload preserves the in-flight queue and active connections; restart is never required for data-driven changes, only for Postfix version upgrades (an operator action, not something the app triggers). |
+| Postfix restart (stop+start) on main.cf/master.cf change, not reload | `postfix reload` (SIGHUP) | Reload is the theoretically lighter-weight option and was the original design, but reproducibly crashed the master process in real integration testing (see integration/README.md) — a cold restart with the identical config never did. Map-only changes (the common case) still need neither. |
 | React + Vite SPA served by FastAPI | Server-rendered templates | Needed for Claude Design compatibility (Phase 4) and for a genuinely interactive admin UI (live status, permission matrices, log filtering). |
 
 ## 10. Open questions for review

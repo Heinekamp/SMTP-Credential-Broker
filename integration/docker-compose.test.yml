@@ -20,9 +20,9 @@ services:
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
       RELAY_COOKIE_SECURE: "false"
-      # Fixed, test-only key — base64("test-key-32-bytes-for-int-tests").
-      # Never use a fixed key outside this throwaway test harness.
-      RELAY_ENCRYPTION_KEY: dGVzdC1rZXktMzItYnl0ZXMtZm9yLWludC10ZXN0cw==
+      # Fixed, test-only key — base64(b"0" * 32). Never use a fixed key
+      # outside this throwaway test harness.
+      RELAY_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
       RELAY_SUBMISSION_HOST: relay-test.internal
     ports:

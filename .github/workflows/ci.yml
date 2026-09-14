@@ -46,3 +46,23 @@ jobs:
       - run: docker compose logs postfix
       - if: always()
         run: docker compose down -v
+
+  integration:
+    # The mandatory spec §25 suite (testing-strategy.md §2) — real SMTP
+    # sessions against the real postfix image, not a mock. See
+    # integration/README.md for what this has already caught; don't
+    # downgrade this to compose-smoke's shallow health check.
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r integration/requirements.txt
+      - run: docker compose -f integration/docker-compose.test.yml up -d --build --wait
+      - run: pytest integration/ -v
+      - if: always()
+        run: docker compose -f integration/docker-compose.test.yml logs
+      - if: always()
+        run: docker compose -f integration/docker-compose.test.yml down -v

@@ -114,19 +114,35 @@ def _apply_config(payload: dict) -> dict:
         return {"ok": True, "success": False, "validation_detail": detail, "reloaded": False}
 
     try:
-        _install_maps(maps)
+        # main.cf must exist on disk before `postmap` runs — it does its
+        # own config lookups and fails outright ("open /etc/postfix/main.cf:
+        # No such file or directory") if main.cf isn't there yet, which is
+        # exactly the state on this container's very first boot before any
+        # config has ever been installed.
         _install_config(main_cf, master_cf)
+        _install_maps(maps)
     except (OSError, RuntimeError) as exc:
         return {"ok": True, "success": False, "validation_detail": f"install failed: {exc}", "reloaded": False}
 
     reloaded = False
     if reload_if_main_changed:
-        result = _run(["postfix", "reload"])
-        if result.returncode != 0:
+        # SIGHUP-triggered `postfix reload` reproducibly crashed the
+        # master process in real testing against a real Postfix instance
+        # — every second-and-later config change, regardless of whether
+        # master ran as this container's PID 1 (`start-fg`) or as a
+        # normal detached daemon (`postfix start`). A cold stop+start of
+        # the exact same config never had that problem in the same
+        # testing. This is also how Postfix gets started at all on this
+        # container's first boot — nothing else starts it (see
+        # postfix/entrypoint.sh).
+        _run(["postfix", "stop"])  # best-effort; "not running" here is fine
+        start_result = _run(["postfix", "start"])
+        if start_result.returncode != 0:
+            combined = f"{start_result.stdout}\n{start_result.stderr}".strip()
             return {
                 "ok": True,
                 "success": False,
-                "validation_detail": f"{detail}\npostfix reload failed: {result.stderr.strip()}",
+                "validation_detail": f"{detail}\npostfix start failed: {combined}",
                 "reloaded": False,
             }
         reloaded = True

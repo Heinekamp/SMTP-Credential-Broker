@@ -46,106 +46,117 @@ def _wait_for_delivery(predicate, timeout: float = 10.0) -> dict | None:
     return None
 
 
-def test_valid_credentials_authenticate(api: httpx.Client) -> None:
-    _, password = create_local_user(api, name="Auth Test", username="auth-test-user")
+def test_valid_credentials_authenticate(api: httpx.Client, uid: str) -> None:
+    _, password = create_local_user(api, name="Auth Test", username=f"auth-test-user-{uid}")
     client = _connect_submission()
     try:
-        client.login("auth-test-user", password)  # raises on failure
+        client.login(f"auth-test-user-{uid}", password)  # raises on failure
     finally:
         client.quit()
 
 
-def test_invalid_credentials_are_rejected(api: httpx.Client) -> None:
-    create_local_user(api, name="Auth Test 2", username="auth-test-user-2")
+def test_invalid_credentials_are_rejected(api: httpx.Client, uid: str) -> None:
+    create_local_user(api, name="Auth Test 2", username=f"auth-test-user-2-{uid}")
     client = _connect_submission()
     try:
         with pytest.raises(smtplib.SMTPAuthenticationError):
-            client.login("auth-test-user-2", "definitely-the-wrong-password")
+            client.login(f"auth-test-user-2-{uid}", "definitely-the-wrong-password")
     finally:
         client.quit()
 
 
-def test_sender_matching_permission_is_accepted_and_mismatch_is_rejected(api: httpx.Client, stub: None) -> None:
+def test_sender_matching_permission_is_accepted_and_mismatch_is_rejected(
+    api: httpx.Client, stub: None, uid: str
+) -> None:
+    printer_address = f"printer-{uid}@example.com"
+    noreply_address = f"noreply-{uid}@example.com"
     account_id = create_upstream_account(
         api, name="STRATO printer", username="printer@example.com", password="printer-upstream-pass"
     )
-    printer_sender = create_sender(api, address="printer@example.com", upstream_account_id=account_id)
+    printer_sender = create_sender(api, address=printer_address, upstream_account_id=account_id)
     noreply_sender_account = create_upstream_account(
         api, name="STRATO noreply", username="noreply@example.com", password="noreply-upstream-pass"
     )
-    create_sender(api, address="noreply@example.com", upstream_account_id=noreply_sender_account)
-    user_id, password = create_local_user(api, name="Printer Service", username="printer-service")
+    create_sender(api, address=noreply_address, upstream_account_id=noreply_sender_account)
+    user_id, password = create_local_user(api, name="Printer Service", username=f"printer-service-{uid}")
     grant(api, user_id=user_id, sender_id=printer_sender)
     push_config(api)
 
     client = _connect_submission()
-    client.login("printer-service", password)
+    client.login(f"printer-service-{uid}", password)
 
     # Allowed sender: accepted.
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: test\n\nbody")
-    delivered = _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com")
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: test\n\nbody")
+    delivered = _wait_for_delivery(lambda d: d["mail_from"] == printer_address)
     assert delivered is not None, "expected the allowed sender's message to reach the upstream stub"
     assert delivered["authenticated_as"] == "printer@example.com"
 
     # Sender the user is NOT permitted to use: Postfix must reject this at
     # the SMTP level (reject_sender_login_mismatch), not just decline to
     # deliver it — this is the core invariant (security-model.md).
-    with pytest.raises(smtplib.SMTPSenderRefused):
-        client.mail("noreply@example.com")
-        code, _ = client.rcpt("dest@example.net")
-        if code == 250:
-            # Some smtplib versions only raise on the RCPT/DATA step
-            # depending on exactly when Postfix rejects; force a clear
-            # failure either way by asserting the code directly.
-            raise smtplib.SMTPSenderRefused(code, b"expected rejection", "noreply@example.com")
+    # NOTE: `.mail()`/`.rcpt()` are low-level smtplib calls that return a
+    # (code, message) tuple and do NOT raise on failure themselves (unlike
+    # `.sendmail()`, which orchestrates the whole transaction and does) —
+    # asserting the code directly, confirmed against a real Postfix
+    # instance to reject at the RCPT stage with 553.
+    mail_code, _ = client.mail(noreply_address)
+    assert mail_code == 250  # Postfix accepts MAIL FROM; the check happens at RCPT
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code == 553, f"expected a sender-login-mismatch rejection, got {rcpt_code} {rcpt_msg!r}"
+    assert b"not owned by" in rcpt_msg
+    client.rset()
     client.quit()
 
 
-def test_correct_upstream_credentials_are_selected_per_sender(api: httpx.Client, stub: None) -> None:
+def test_correct_upstream_credentials_are_selected_per_sender(api: httpx.Client, stub: None, uid: str) -> None:
+    printer_address = f"printer-{uid}@example.com"
+    noreply_address = f"noreply-{uid}@example.com"
     printer_account = create_upstream_account(
         api, name="STRATO printer", username="printer@example.com", password="printer-upstream-pass"
     )
     noreply_account = create_upstream_account(
         api, name="STRATO noreply", username="noreply@example.com", password="noreply-upstream-pass"
     )
-    printer_sender = create_sender(api, address="printer@example.com", upstream_account_id=printer_account)
-    noreply_sender = create_sender(api, address="noreply@example.com", upstream_account_id=noreply_account)
-    user_id, password = create_local_user(api, name="Multi Sender", username="multi-sender")
+    printer_sender = create_sender(api, address=printer_address, upstream_account_id=printer_account)
+    noreply_sender = create_sender(api, address=noreply_address, upstream_account_id=noreply_account)
+    user_id, password = create_local_user(api, name="Multi Sender", username=f"multi-sender-{uid}")
     grant(api, user_id=user_id, sender_id=printer_sender)
     grant(api, user_id=user_id, sender_id=noreply_sender)
     push_config(api)
 
     client = _connect_submission()
-    client.login("multi-sender", password)
+    client.login(f"multi-sender-{uid}", password)
 
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: t\n\nb")
-    client.sendmail("noreply@example.com", ["dest@example.net"], "Subject: t\n\nb")
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: t\n\nb")
+    client.sendmail(noreply_address, ["dest@example.net"], "Subject: t\n\nb")
     client.quit()
 
-    printer_delivery = _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com")
-    noreply_delivery = _wait_for_delivery(lambda d: d["mail_from"] == "noreply@example.com")
+    printer_delivery = _wait_for_delivery(lambda d: d["mail_from"] == printer_address)
+    noreply_delivery = _wait_for_delivery(lambda d: d["mail_from"] == noreply_address)
     assert printer_delivery["authenticated_as"] == "printer@example.com"
     assert noreply_delivery["authenticated_as"] == "noreply@example.com"
 
 
-def test_permission_change_takes_effect_after_regeneration(api: httpx.Client, stub: None) -> None:
+def test_permission_change_takes_effect_after_regeneration(api: httpx.Client, stub: None, uid: str) -> None:
+    printer_address = f"printer-{uid}@example.com"
+    alerts_address = f"alerts-{uid}@example.com"
     account_id = create_upstream_account(
         api, name="STRATO reassign", username="printer@example.com", password="printer-upstream-pass"
     )
-    printer_sender = create_sender(api, address="printer@example.com", upstream_account_id=account_id)
+    printer_sender = create_sender(api, address=printer_address, upstream_account_id=account_id)
     alerts_account = create_upstream_account(
         api, name="STRATO alerts", username="alerts@example.com", password="alerts-upstream-pass"
     )
-    alerts_sender = create_sender(api, address="alerts@example.com", upstream_account_id=alerts_account)
-    user_id, password = create_local_user(api, name="Reassign Test", username="reassign-test-user")
+    alerts_sender = create_sender(api, address=alerts_address, upstream_account_id=alerts_account)
+    user_id, password = create_local_user(api, name="Reassign Test", username=f"reassign-test-user-{uid}")
     grant(api, user_id=user_id, sender_id=printer_sender)
     push_config(api)
 
     client = _connect_submission()
-    client.login("reassign-test-user", password)
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: t\n\nb")
+    client.login(f"reassign-test-user-{uid}", password)
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: t\n\nb")
     client.quit()
-    assert _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com") is not None
+    assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address) is not None
 
     # Reassign: revoke printer@, grant alerts@ instead.
     api.delete(f"/api/senders/{printer_sender}/permissions/{user_id}").raise_for_status()
@@ -153,67 +164,93 @@ def test_permission_change_takes_effect_after_regeneration(api: httpx.Client, st
     push_config(api)
 
     client = _connect_submission()
-    client.login("reassign-test-user", password)
-    with pytest.raises(smtplib.SMTPSenderRefused):
-        client.mail("printer@example.com")
-        code, _ = client.rcpt("dest@example.net")
-        if code == 250:
-            raise smtplib.SMTPSenderRefused(code, b"expected rejection after revocation", "printer@example.com")
-    client.sendmail("alerts@example.com", ["dest@example.net"], "Subject: t\n\nb")
+    client.login(f"reassign-test-user-{uid}", password)
+    mail_code, _ = client.mail(printer_address)
+    assert mail_code == 250
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code == 553, f"expected rejection after revocation, got {rcpt_code} {rcpt_msg!r}"
+    client.rset()
+    client.sendmail(alerts_address, ["dest@example.net"], "Subject: t\n\nb")
     client.quit()
-    assert _wait_for_delivery(lambda d: d["mail_from"] == "alerts@example.com") is not None
+    assert _wait_for_delivery(lambda d: d["mail_from"] == alerts_address) is not None
 
 
 def test_open_relay_is_prevented_without_authentication(api: httpx.Client) -> None:
-    client = smtplib.SMTP(SUBMISSION_HOST, PLAIN_SMTP_PORT, timeout=15)
-    client.ehlo()
+    # Deliberately the submission port (587), not plain smtp (25): port 25
+    # is bound loopback-only by design (postfix-architecture.md §3) and
+    # isn't reachable from outside the container at all — trying it here
+    # would test a port that's already unreachable, not the actual exposed
+    # attack surface. Submission is what's genuinely reachable and must
+    # reject relay attempts with no AUTH, regardless of source.
+    client = _connect_submission()
     with pytest.raises((smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)):
         client.sendmail("nobody@example.com", ["dest@example.net"], "Subject: t\n\nb")
     client.quit()
 
 
-def test_upstream_auth_failure_does_not_leak_the_password(api: httpx.Client, stub: None) -> None:
+def test_plain_smtp_port_is_unreachable_from_outside(api: httpx.Client) -> None:
+    # Confirms the *other* half of the open-relay story: port 25 isn't
+    # just "also protected by AUTH," it's not reachable at all from
+    # outside the container (inet_interfaces=loopback-only on that
+    # service — postfix-architecture.md §3).
+    with pytest.raises((ConnectionRefusedError, smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, OSError)):
+        smtplib.SMTP(SUBMISSION_HOST, PLAIN_SMTP_PORT, timeout=5)
+
+
+def test_upstream_auth_failure_does_not_leak_the_password(api: httpx.Client, stub: None, uid: str) -> None:
+    printer_address = f"printer-{uid}@example.com"
     account_id = create_upstream_account(
         api, name="STRATO wrong-password", username="printer@example.com", password="not-the-real-password"
     )
-    sender_id = create_sender(api, address="printer@example.com", upstream_account_id=account_id)
-    user_id, password = create_local_user(api, name="Bad Upstream", username="bad-upstream-user")
+    sender_id = create_sender(api, address=printer_address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Bad Upstream", username=f"bad-upstream-user-{uid}")
     grant(api, user_id=user_id, sender_id=sender_id)
     push_config(api)
 
     client = _connect_submission()
-    client.login("bad-upstream-user", password)
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: t\n\nb")
+    client.login(f"bad-upstream-user-{uid}", password)
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: t\n\nb")
     client.quit()
 
     # The message must never reach the stub (upstream AUTH fails before
     # DATA), and Postfix's bounce/log text must never contain the
     # configured password anywhere the app's mail_log would surface it.
-    assert _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com", timeout=5) is None
+    assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address, timeout=5) is None
 
 
 def test_credential_rotation_old_password_fails_new_succeeds_local_user_unaffected(
-    api: httpx.Client, stub: None
+    api: httpx.Client, stub: None, uid: str
 ) -> None:
+    printer_address = f"printer-{uid}@example.com"
+    rotation_username = f"printer-rotation-{uid}@example.com"
     account_id = create_upstream_account(
-        api, name="STRATO rotation", username="printer@example.com", password="original-upstream-pass"
+        api, name="STRATO rotation", username=rotation_username, password="original-upstream-pass"
     )
-    sender_id = create_sender(api, address="printer@example.com", upstream_account_id=account_id)
-    user_id, password = create_local_user(api, name="Rotation Test", username="rotation-test-user")
+    sender_id = create_sender(api, address=printer_address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Rotation Test", username=f"rotation-test-user-{uid}")
     grant(api, user_id=user_id, sender_id=sender_id)
+
+    # The stub only knows fixed credentials from its own startup env/prior
+    # PUTs — register this test's own upstream identity with it directly,
+    # since `rotation_username` is unique per test run.
+    httpx.put(
+        "http://localhost:2526/credentials",
+        json={"username": rotation_username, "password": "original-upstream-pass"},
+        timeout=5,
+    )
     push_config(api)
 
     # Prove the OLD credential currently works, before rotating anything.
     client = _connect_submission()
-    client.login("rotation-test-user", password)
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: before\n\nb")
+    client.login(f"rotation-test-user-{uid}", password)
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: before\n\nb")
     client.quit()
-    assert _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com") is not None
+    assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address) is not None
 
     # Rotate: the provider's actual password changes...
     httpx.put(
         "http://localhost:2526/credentials",
-        json={"username": "printer@example.com", "password": "rotated-upstream-pass"},
+        json={"username": rotation_username, "password": "rotated-upstream-pass"},
         timeout=5,
     )
     # ...the relay is told the new password...
@@ -223,7 +260,7 @@ def test_credential_rotation_old_password_fails_new_succeeds_local_user_unaffect
 
     # New credential now works.
     client = _connect_submission()
-    client.login("rotation-test-user", password)  # local credential is untouched by any of this
-    client.sendmail("printer@example.com", ["dest@example.net"], "Subject: after\n\nb")
+    client.login(f"rotation-test-user-{uid}", password)  # local credential is untouched by any of this
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: after\n\nb")
     client.quit()
-    assert _wait_for_delivery(lambda d: d["mail_from"] == "printer@example.com") is not None
+    assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address) is not None

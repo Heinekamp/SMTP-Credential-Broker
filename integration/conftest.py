@@ -1,5 +1,6 @@
 import subprocess
 import time
+import uuid
 from collections.abc import Generator
 
 import httpx
@@ -8,7 +9,10 @@ import pytest
 COMPOSE_FILE = "integration/docker-compose.test.yml"
 APP_URL = "http://localhost:8000"
 STUB_INSPECT_URL = "http://localhost:2526"
-ADMIN_EMAIL = "admin@integration.test"
+# NOT "@...test" — pydantic's EmailStr (via python-email-validator) rejects
+# RFC 2606 reserved TLDs like .test/.invalid/.localhost outright, found by
+# a real 422 from this exact fixture.
+ADMIN_EMAIL = "admin@example.com"
 ADMIN_PASSWORD = "Integration-Test-Passw0rd!"
 
 
@@ -54,6 +58,17 @@ def api() -> Generator[httpx.Client, None, None]:
     client.headers["x-csrf-token"] = client.cookies["csrf_token"]
     yield client
     client.close()
+
+
+@pytest.fixture()
+def uid() -> str:
+    """A short unique-per-test string. Senders (address) and local users
+    (username) are both globally unique in the DB and the app/postfix
+    stack is shared across the whole test session — without this,
+    different test functions reusing the same literal address (e.g.
+    "printer@example.com") collide with a real 409, not a test bug in the
+    product. Found by hitting exactly that collision."""
+    return uuid.uuid4().hex[:8]
 
 
 @pytest.fixture()
