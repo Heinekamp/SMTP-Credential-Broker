@@ -6,6 +6,7 @@ import { AppShell } from "./components/AppShell";
 import { ComingSoon } from "./pages/ComingSoon";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
+import { UpstreamAccountsRoutes } from "./pages/upstream-accounts";
 import { fetchSetupRequired } from "./lib/api/setup";
 import { useSession } from "./lib/useSession";
 
@@ -47,7 +48,7 @@ export function App() {
         }
       >
         <Route path="/" element={<ComingSoon title="Dashboard" />} />
-        <Route path="/upstream-accounts/*" element={<ComingSoon title="Upstream Accounts" />} />
+        <Route path="/upstream-accounts/*" element={<UpstreamAccountsRoutes />} />
         <Route path="/senders/*" element={<ComingSoon title="Senders" />} />
         <Route path="/local-users/*" element={<ComingSoon title="Local SMTP Users" />} />
         <Route path="/mail-log" element={<ComingSoon title="Mail Log" />} />
