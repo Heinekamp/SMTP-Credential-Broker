@@ -28,7 +28,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _serve_one(sock_path: str, responder: Callable[[dict], dict], stop_event: threading.Event) -> None:
+def _serve_one(
+    sock_path: str, responder: Callable[[dict], dict], stop_event: threading.Event, ready_event: threading.Event
+) -> None:
     """A minimal stand-in for postfix/control_surface.py's real server —
     exercises the actual wire protocol (one JSON line in, one JSON line
     out, over AF_UNIX) without needing the real script or a Postfix
@@ -37,6 +39,7 @@ def _serve_one(sock_path: str, responder: Callable[[dict], dict], stop_event: th
     server.bind(sock_path)
     server.listen(1)
     server.settimeout(0.2)
+    ready_event.set()
     while not stop_event.is_set():
         try:
             conn, _ = server.accept()
@@ -65,8 +68,17 @@ def control_socket(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Generator[Calla
 
     def _start(responder: Callable[[dict], dict]) -> None:
         stop_event = threading.Event()
-        thread = threading.Thread(target=_serve_one, args=(sock_path, responder, stop_event), daemon=True)
+        ready_event = threading.Event()
+        thread = threading.Thread(
+            target=_serve_one, args=(sock_path, responder, stop_event, ready_event), daemon=True
+        )
         thread.start()
+        # Without this, the client connect below races the server thread's
+        # bind()/listen() — usually wins on a fast/idle machine, but flakes
+        # (FileNotFoundError/ConnectionRefused) on a busier one, such as a
+        # shared CI runner.
+        if not ready_event.wait(timeout=2):
+            raise RuntimeError("test control server did not become ready in time")
         threads.append((thread, stop_event))
 
     yield _start
