@@ -11,6 +11,14 @@ export interface ConfirmModalProps {
   onConfirm: () => void;
   onCancel: () => void;
   confirming?: boolean;
+  /** A mutation failure (e.g. a 409 conflict) — rendered as an inline
+   * alert instead of letting it fail silently. */
+  error?: string | null;
+  /** True when confirming is known in advance to be pointless (e.g. a
+   * delete-precheck already showed this can't succeed) — disables the
+   * confirm button rather than letting the admin trigger a doomed
+   * request, with `body` expected to explain why. */
+  confirmDisabled?: boolean;
 }
 
 // Design handoff screen 11's shared confirmation-modal pattern: a
@@ -25,6 +33,8 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
   confirming = false,
+  error = null,
+  confirmDisabled = false,
 }: ConfirmModalProps) {
   return (
     <div
@@ -43,11 +53,21 @@ export function ConfirmModal({
         <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginBottom: 20, lineHeight: "var(--leading-normal)" }}>
           {body}
         </div>
+        {error && (
+          <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="default" onClick={onCancel} disabled={confirming}>
             Cancel
           </Button>
-          <Button variant={variant} onClick={onConfirm} disabled={confirming}>
+          <Button
+            variant={variant}
+            onClick={onConfirm}
+            disabled={confirming || confirmDisabled}
+            title={confirmDisabled ? "See above — this can't be deleted right now" : undefined}
+          >
             {confirmLabel}
           </Button>
         </div>

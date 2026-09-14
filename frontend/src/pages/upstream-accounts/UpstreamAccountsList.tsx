@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, StatusBadge, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { ApiError } from "../../lib/apiClient";
 import { parseApiDate } from "../../lib/apiDate";
 import {
   deleteUpstreamAccount,
@@ -37,6 +38,7 @@ export function UpstreamAccountsList() {
   const [disableTarget, setDisableTarget] = useState<UpstreamAccount | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UpstreamAccount | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateUpstreamAccount(id, { enabled }),
@@ -49,6 +51,17 @@ export function UpstreamAccountsList() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setDeleteTarget(null);
       setDeletePrecheck(null);
+      setDeleteError(null);
+    },
+    onError: (err) => {
+      // Belt-and-suspenders: the precheck below should already prevent
+      // this from being reachable, but a sender could be attached in the
+      // gap between the precheck fetch and this click.
+      setDeleteError(
+        err instanceof ApiError && typeof err.detail === "string"
+          ? err.detail
+          : "Could not delete this account.",
+      );
     },
   });
 
@@ -56,6 +69,7 @@ export function UpstreamAccountsList() {
     const precheck = await deleteUpstreamAccountPrecheck(account.id);
     setDeleteTarget(account);
     setDeletePrecheck(precheck.dependent_sender_addresses);
+    setDeleteError(null);
   }
 
   return (
@@ -179,16 +193,20 @@ export function UpstreamAccountsList() {
               "No senders currently reference this account."
             ) : (
               <>
-                The following senders will stop being able to send: {deletePrecheck.join(", ")}
+                This account can't be deleted while senders still use it. Reassign or delete these senders
+                first: {deletePrecheck.join(", ")}
               </>
             )
           }
           confirmLabel="Delete"
           variant="danger"
           confirming={remove.isPending}
+          confirmDisabled={deletePrecheck.length > 0}
+          error={deleteError}
           onCancel={() => {
             setDeleteTarget(null);
             setDeletePrecheck(null);
+            setDeleteError(null);
           }}
           onConfirm={() => remove.mutate(deleteTarget.id)}
         />

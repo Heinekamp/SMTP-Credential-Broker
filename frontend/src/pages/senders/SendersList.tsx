@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { ApiError } from "../../lib/apiClient";
 import { listUpstreamAccounts } from "../../lib/api/upstreamAccounts";
 import { deleteSender, deleteSenderPrecheck, listSenders, updateSender, type Sender } from "../../lib/api/senders";
 
@@ -19,6 +20,7 @@ export function SendersList() {
   const [disableTarget, setDisableTarget] = useState<Sender | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sender | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateSender(id, { enabled }),
@@ -31,6 +33,15 @@ export function SendersList() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setDeleteTarget(null);
       setDeletePrecheck(null);
+      setDeleteError(null);
+    },
+    onError: (err) => {
+      // Deleting a sender is expected to always succeed (permission
+      // grants cascade away) — this is a safety net for anything
+      // unexpected, not a normally-reachable path.
+      setDeleteError(
+        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not delete this sender.",
+      );
     },
   });
 
@@ -38,6 +49,7 @@ export function SendersList() {
     const precheck = await deleteSenderPrecheck(sender.id);
     setDeleteTarget(sender);
     setDeletePrecheck(precheck.allowed_local_user_names);
+    setDeleteError(null);
   }
 
   const accountById = new Map((upstreamAccounts ?? []).map((a) => [a.id, a]));
@@ -178,9 +190,11 @@ export function SendersList() {
           confirmLabel="Delete"
           variant="danger"
           confirming={remove.isPending}
+          error={deleteError}
           onCancel={() => {
             setDeleteTarget(null);
             setDeletePrecheck(null);
+            setDeleteError(null);
           }}
           onConfirm={() => remove.mutate(deleteTarget.id)}
         />
