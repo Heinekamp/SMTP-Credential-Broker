@@ -39,8 +39,17 @@ _LINE_RE = re.compile(
     r"^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+postfix/(?P<service>[\w./-]+)\[(?P<pid>\d+)\]:\s*(?P<rest>.*)$"
 )
 # Modern Postfix ("long queue IDs") uses a wider alphanumeric alphabet
-# than plain hex, not just 0-9A-F.
-_QUEUE_ID_RE = re.compile(r"^([0-9A-Za-z]{6,16}):\s*(.*)$")
+# than plain hex, not just 0-9A-F — but a bare alphanumeric-token-then-colon
+# match at the start of the message also matches ordinary log-level prefixes
+# like "warning:" or "fatal:", which are not queue IDs (found by running
+# against a real Postfix instance: a failed AUTH attempt logs
+# "warning: ...: SASL ... authentication failed: ..., sasl_username=x" and
+# "warning" was being treated as a 7-character queue ID, fabricating a
+# phantom mail_log row attributing a failed login to a fake queue). A real
+# queue ID always contains at least one digit; no plain-English log-level
+# word does — requiring one is a minimal, robust way to reject them without
+# hardcoding to hex and risking a real long-queue-ID false negative.
+_QUEUE_ID_RE = re.compile(r"^(?=[0-9A-Za-z]*\d)([0-9A-Za-z]{6,16}):\s*(.*)$")
 _SASL_USERNAME_RE = re.compile(r"sasl_username=(?P<value>\S+)")
 _FROM_RE = re.compile(r"from=<(?P<value>[^>]*)>")
 _TO_RE = re.compile(r"\bto=<(?P<value>[^>]*)>")

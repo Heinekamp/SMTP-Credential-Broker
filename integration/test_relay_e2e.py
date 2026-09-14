@@ -73,6 +73,34 @@ def test_invalid_credentials_are_rejected(api: httpx.Client, uid: str) -> None:
         client.quit()
 
 
+def test_failed_auth_does_not_produce_a_phantom_mail_log_row(api: httpx.Client, uid: str) -> None:
+    """Regression test: a failed AUTH attempt logs a `warning: ...:
+    sasl_username=x` line, which mail_log_parser.py's queue-ID regex used
+    to mistake the leading word "warning" itself for a 7-character queue
+    ID — fabricating a phantom mail_log row attributing a failed login to
+    a fake "warning" queue (see docs/postfix-architecture.md §9 and
+    backend/tests/test_mail_log_parser.py for the unit-level fix and
+    detail). This proves it end to end against a real Postfix instance."""
+    username = f"auth-test-user-warning-{uid}"
+    create_local_user(api, name="Auth Warning Test", username=username)
+    client = _connect_submission()
+    try:
+        with pytest.raises(smtplib.SMTPAuthenticationError):
+            client.login(username, "definitely-the-wrong-password")
+    finally:
+        client.quit()
+
+    # No polling-until-true here on purpose: the failed AUTH line is
+    # already on disk by the time login() raises, and ingestion (a side
+    # effect of GET /api/mail-log) is synchronous within one request — a
+    # regression would fabricate the phantom row on the very first call,
+    # not eventually, so retrying "until true" would risk masking it.
+    time.sleep(1.0)
+    response = api.get("/api/mail-log")
+    response.raise_for_status()
+    assert all(e["queue_id"] != "warning" for e in response.json()["entries"])
+
+
 def test_sender_matching_permission_is_accepted_and_mismatch_is_rejected(
     api: httpx.Client, stub: None, uid: str
 ) -> None:

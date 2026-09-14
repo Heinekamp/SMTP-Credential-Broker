@@ -98,3 +98,23 @@ def test_irrelevant_lines_are_ignored() -> None:
 
 def test_garbage_line_is_ignored() -> None:
     assert parse_line("this is not a postfix log line at all") is None
+
+
+def test_failed_auth_warning_is_not_mistaken_for_a_queue_id() -> None:
+    """A real bug, found by running against a real Postfix instance: a
+    failed AUTH attempt logs a "warning: ...: sasl_username=x" line, and
+    the queue-ID regex was matching the leading word "warning" itself as a
+    7-character queue ID, fabricating a phantom mail_log row attributing a
+    failed login to a fake "warning" queue."""
+    line = (
+        "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: "
+        "unknown[172.18.0.1]: SASL CRAM-MD5 authentication failed: "
+        "authentication failure, sasl_username=printer-service"
+    )
+    assert parse_line(line) is None
+
+
+def test_other_plain_log_level_words_are_not_mistaken_for_queue_ids() -> None:
+    for word in ("warning", "fatal", "starting", "stopping", "connect", "disconnect"):
+        line = f"Sep 14 09:31:03 relay-test postfix/smtpd[1]: {word}: something sasl_username=x"
+        assert parse_line(line) is None, f"{word!r} was mistaken for a queue ID"

@@ -5,7 +5,7 @@ Drives real SMTP sessions against a real Postfix instance (the actual
 stand-in, per [docs/testing-strategy.md](../docs/testing-strategy.md) §2.
 Every test here corresponds to one of spec §25's mandatory scenarios.
 
-**Status: verified.** All 12 scenarios pass against a real Docker Desktop +
+**Status: verified.** All 15 scenarios pass against a real Docker Desktop +
 real Postfix 3.7 instance, twice in a row from a clean `down -v`/`up -d`
 (not a fluke). Getting here surfaced and fixed several real bugs that no
 amount of unit testing would have caught — see "What this caught" below.
@@ -87,3 +87,16 @@ Postfix instance (all fixed; kept here so the reasoning isn't lost):
   ingestion tests caught this immediately (local user attribution and
   the rejection itself were both silently absent) — see
   postfix-architecture.md §9.
+- **A failed AUTH attempt's log line was mistaken for a queue ID.** Real
+  Postfix logs `warning: ...: SASL ... authentication failed: ...,
+  sasl_username=x` on a bad login — the parser's queue-ID regex (a bare
+  alphanumeric token followed by `:`) matched the leading word `warning`
+  itself (7 characters, well within the expected length), fabricating a
+  phantom `mail_log` row attributing a failed login to a fake "warning"
+  queue. Found manually (a Stage 7 frontend smoke test against a real
+  login-with-wrong-password flow showed the phantom row in the Mail Log
+  screen), then given permanent coverage at both levels: a unit test
+  against the exact log line, and a dedicated integration test here.
+  Fixed by requiring the matched token to
+  contain at least one digit — true of every real queue ID, true of no
+  plain-English log-level word.
