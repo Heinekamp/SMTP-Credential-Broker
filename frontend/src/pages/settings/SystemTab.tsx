@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, StatusBadge } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
+import { ApiError } from "../../lib/apiClient";
 import { parseApiDate } from "../../lib/apiDate";
-import { listConfigGenerations } from "../../lib/api/config";
+import { generateConfig, listConfigGenerations } from "../../lib/api/config";
 import { fetchHealth } from "../../lib/api/health";
 import { fetchSystemStatus } from "../../lib/api/system";
 
@@ -16,9 +18,27 @@ import { fetchSystemStatus } from "../../lib/api/system";
 // only what the app actually knows (no Postfix version is exposed
 // anywhere in the API, so it's omitted rather than faked).
 export function SystemTab() {
+  const queryClient = useQueryClient();
   const { data: systemStatus } = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
   const { data: health } = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const { data: generations, isLoading } = useQuery({ queryKey: ["config-generations"], queryFn: listConfigGenerations });
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
+  const generate = useMutation({
+    mutationFn: generateConfig,
+    onSuccess: () => {
+      setGenerateError(null);
+      queryClient.invalidateQueries({ queryKey: ["health"] });
+      queryClient.invalidateQueries({ queryKey: ["config-generations"] });
+    },
+    onError: (err) => {
+      setGenerateError(
+        err instanceof ApiError && err.status === 503
+          ? "Postfix's control surface is unreachable — check that the postfix container is running."
+          : "Config generation failed — see the history below for details.",
+      );
+    },
+  });
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
@@ -53,12 +73,38 @@ export function SystemTab() {
               size="sm"
             />
           </div>
+          <div>
+            <div style={fieldLabelStyle}>Config In Sync</div>
+            <StatusBadge
+              status={health?.config_in_sync.ok ? "idle" : "fault"}
+              label={health?.config_in_sync.ok ? "Yes" : "Out of sync"}
+              size="sm"
+            />
+            {health && !health.config_in_sync.ok && (
+              <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 6 }}>
+                {health.config_in_sync.detail}
+              </p>
+            )}
+          </div>
           {generations && generations.length > 0 && (
             <div>
               <div style={fieldLabelStyle}>Last Generation</div>
               <div style={{ fontSize: "var(--text-sm)" }}>{parseApiDate(generations[0].generated_at).toLocaleString()}</div>
             </div>
           )}
+          <div>
+            <Button variant="accent" onClick={() => generate.mutate()} disabled={generate.isPending}>
+              {generate.isPending ? "Generating…" : "Generate & Apply"}
+            </Button>
+            {generateError && (
+              <p style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginTop: 6 }}>{generateError}</p>
+            )}
+            {generate.isSuccess && !generateError && (
+              <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 6 }}>
+                {generate.data.success ? "Applied." : "Validation failed — see history below."}
+              </p>
+            )}
+          </div>
         </div>
       </Card>
 

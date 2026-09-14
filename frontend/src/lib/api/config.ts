@@ -15,3 +15,15 @@ export interface ConfigGeneration {
 export function listConfigGenerations(): Promise<ConfigGeneration[]> {
   return apiFetch<ConfigGeneration[]>("/api/config/generations");
 }
+
+export interface GenerationResult {
+  generation_id: number;
+  success: boolean;
+  validation_detail: string;
+  reloaded: boolean;
+  warnings: string[];
+}
+
+export function generateConfig(): Promise<GenerationResult> {
+  return apiFetch<GenerationResult>("/api/config/generate", { method: "POST" });
+}
