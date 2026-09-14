@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 
 import { Button, Card, TextInput } from "../design-system/components";
 import { ApiError } from "../lib/apiClient";
@@ -13,10 +14,10 @@ export interface TotpEnrollModalProps {
 // detail (it was out of scope until now), so this reuses the same
 // scrim+Card modal pattern as ChangePasswordModal.tsx and the same
 // monospace-box pattern as the one-time password reveal
-// (local-users/PasswordReveal.tsx) for the secret. No QR code — see the
-// Stage 8 plan's minimal-dependency rationale; the raw secret is shown as
-// copyable text, which every mainstream authenticator app accepts via
-// manual entry.
+// (local-users/PasswordReveal.tsx) for the secret. A QR code (added later,
+// see issue #2) sits alongside the copyable text rather than replacing it
+// — most authenticator apps are on a phone and scan a code, but the raw
+// secret stays available for manual entry.
 export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
   const [secret, setSecret] = useState<string | null>(null);
   const [otpauthUri, setOtpauthUri] = useState<string | null>(null);
@@ -71,6 +72,12 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
                 {error}
               </div>
             )}
+
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+              <div style={{ background: "#fff", padding: 12, borderRadius: "var(--radius-sm)" }}>
+                <QRCodeSVG value={otpauthUri} size={176} />
+              </div>
+            </div>
 
             <div style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "var(--tracking-label)", marginBottom: 4 }}>
               Secret
