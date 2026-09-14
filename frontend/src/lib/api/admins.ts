@@ -22,3 +22,23 @@ export function changeOwnPassword(currentPassword: string, newPassword: string):
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
 }
+
+export interface TotpEnrollResponse {
+  secret: string;
+  otpauth_uri: string;
+}
+
+export function enrollTotp(): Promise<TotpEnrollResponse> {
+  return apiFetch<TotpEnrollResponse>("/api/admins/me/totp/enroll", { method: "POST" });
+}
+
+export function confirmTotp(secret: string, code: string): Promise<void> {
+  return apiFetch<void>("/api/admins/me/totp/confirm", {
+    method: "POST",
+    body: JSON.stringify({ secret, code }),
+  });
+}
+
+export function removeTotp(): Promise<void> {
+  return apiFetch<void>("/api/admins/me/totp/remove", { method: "POST" });
+}

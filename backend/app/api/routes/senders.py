@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.core.audit import client_ip, record_audit
 from app.core.permissions import grant_permission, revoke_permission
 from app.models.admin import AdminUser
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
@@ -56,7 +57,12 @@ def list_senders(db: Session = Depends(get_db)) -> list[SenderRead]:
 
 
 @router.post("", response_model=SenderRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_csrf)])
-def create_sender(payload: SenderCreate, db: Session = Depends(get_db)) -> SenderRead:
+def create_sender(
+    payload: SenderCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> SenderRead:
     _require_upstream_account(db, payload.upstream_account_id)
     sender = Sender(
         address=payload.address,
@@ -71,6 +77,18 @@ def create_sender(payload: SenderCreate, db: Session = Depends(get_db)) -> Sende
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "A sender with this address already exists") from exc
     db.refresh(sender)
+    # A separate commit, deliberately after the create has already
+    # succeeded — see upstream_accounts.py's delete_account for why.
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="sender.create",
+        target_type="sender",
+        target_id=sender.id,
+        detail={"address": sender.address},
+        ip_address=client_ip(request),
+    )
+    db.commit()
     return _to_read(db, sender)
 
 
@@ -80,7 +98,13 @@ def get_sender(sender_id: int, db: Session = Depends(get_db)) -> SenderRead:
 
 
 @router.patch("/{sender_id}", response_model=SenderRead, dependencies=[Depends(require_csrf)])
-def update_sender(sender_id: int, payload: SenderUpdate, db: Session = Depends(get_db)) -> SenderRead:
+def update_sender(
+    sender_id: int,
+    payload: SenderUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> SenderRead:
     sender = _get_or_404(db, sender_id)
     data = payload.model_dump(exclude_unset=True)
     if "upstream_account_id" in data and data["upstream_account_id"] is not None:
@@ -93,6 +117,16 @@ def update_sender(sender_id: int, payload: SenderUpdate, db: Session = Depends(g
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "A sender with this address already exists") from exc
     db.refresh(sender)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="sender.update",
+        target_type="sender",
+        target_id=sender.id,
+        detail={"fields": sorted(data.keys())},
+        ip_address=client_ip(request),
+    )
+    db.commit()
     return _to_read(db, sender)
 
 
@@ -109,9 +143,24 @@ def delete_precheck(sender_id: int, db: Session = Depends(get_db)) -> DeleteSend
 
 
 @router.delete("/{sender_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
-def delete_sender(sender_id: int, db: Session = Depends(get_db)) -> None:
+def delete_sender(
+    sender_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
     sender = _get_or_404(db, sender_id)
+    address = sender.address
     db.delete(sender)  # cascades user_sender_permissions (ondelete=CASCADE)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="sender.delete",
+        target_type="sender",
+        target_id=sender_id,
+        detail={"address": address},
+        ip_address=client_ip(request),
+    )
     db.commit()
 
 
@@ -142,13 +191,25 @@ def get_permissions(sender_id: int, db: Session = Depends(get_db)) -> SenderPerm
 def grant(
     sender_id: int,
     local_user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
-    _get_or_404(db, sender_id)
-    if db.get(LocalSmtpUser, local_user_id) is None:
+    sender = _get_or_404(db, sender_id)
+    local_user = db.get(LocalSmtpUser, local_user_id)
+    if local_user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Local SMTP user not found")
     grant_permission(db, local_smtp_user_id=local_user_id, sender_id=sender_id, granted_by_admin_id=admin.id)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="permission.grant",
+        target_type="user_sender_permission",
+        target_id=sender_id,
+        detail={"sender": sender.address, "local_user": local_user.username},
+        ip_address=client_ip(request),
+    )
+    db.commit()
 
 
 @router.delete(
@@ -156,6 +217,23 @@ def grant(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_csrf)],
 )
-def revoke(sender_id: int, local_user_id: int, db: Session = Depends(get_db)) -> None:
-    _get_or_404(db, sender_id)
+def revoke(
+    sender_id: int,
+    local_user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
+    sender = _get_or_404(db, sender_id)
+    local_user = db.get(LocalSmtpUser, local_user_id)
     revoke_permission(db, local_smtp_user_id=local_user_id, sender_id=sender_id)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="permission.revoke",
+        target_type="user_sender_permission",
+        target_id=sender_id,
+        detail={"sender": sender.address, "local_user": local_user.username if local_user else None},
+        ip_address=client_ip(request),
+    )
+    db.commit()

@@ -32,20 +32,30 @@ export function Login() {
     try {
       const response = await login(email, password, stage === "totp" ? totpCode : undefined);
       if (response.totp_required) {
-        // Real backend state, not a hardcoded mock — see
-        // backend/app/api/routes/auth.py. Actual TOTP verification lands
-        // alongside enrollment in a later stage; this UI is wired to the
-        // field now so it needs no further changes when that arrives.
         setStage("totp");
         return;
       }
-      await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
+      // refetchQueries, not invalidateQueries: no route observes the
+      // session query yet (we're still on /login), so invalidateQueries
+      // would only mark the old cached value stale without replacing it
+      // — RequireSession would then mount on "/" a moment later, read
+      // that stale (pre-login, unauthenticated) value, and bounce straight
+      // back to /login before the background refetch caught up. Real bug,
+      // found via a real logout-then-log-back-in-with-TOTP run: the cache
+      // must actually be correct *before* navigating, not just marked dirty.
+      await queryClient.refetchQueries({ queryKey: SESSION_QUERY_KEY });
       navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
         const detail = err.detail as RateLimitDetail;
         setRetryMessage(`Too many attempts. Try again in ${formatRetryAfter(detail.retry_after_seconds)}.`);
         setStage("rate-limited");
+      } else if (stage === "totp") {
+        // Distinct from the email/password message on purpose: reaching
+        // this step already proved the password was correct, so there's
+        // nothing left to protect by staying generic here (backend/app/
+        // api/routes/auth.py's login() returns this exact string).
+        setError("Invalid authentication code.");
       } else {
         // Deliberately generic — never reveal whether the email or the
         // password was the wrong part (claude-design-prompt.md's Login spec).

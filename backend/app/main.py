@@ -1,7 +1,8 @@
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
@@ -16,8 +17,25 @@ from app.api.routes import (
     system,
     upstream_accounts,
 )
+from app.core.logging_config import configure_logging
+from app.core.request_context import set_request_id
+
+configure_logging()
 
 app = FastAPI(title="Managed SMTP Relay")
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next) -> Response:
+    """Generates one correlation ID per request, threaded through
+    structured log lines and audit_log entries (security-model.md §8) via
+    core/request_context.py, and echoed back as a response header so a
+    client-reported issue can be traced to its exact log lines."""
+    request_id = str(uuid.uuid4())
+    set_request_id(request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")

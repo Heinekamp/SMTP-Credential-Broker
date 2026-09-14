@@ -175,13 +175,24 @@ bogus entry.
 
 ## 8. Logging
 
-- Application logs are structured (JSON) and correlate an admin action
-  (`audit_log` entry, with the acting admin and request ID) to the resulting
-  `config_generations` row and, where relevant, to the Postfix log lines for
-  a delivery (via queue ID).
+- Application logs are structured (JSON) — `app/core/logging_config.py`'s
+  `JsonFormatter`, configured once at app startup — and every admin action
+  writes one `audit_log` row (`app/core/audit.py`'s `record_audit`, wired
+  into every mutating route: upstream accounts, senders, local users,
+  permissions, admin accounts, config generation) plus one correlated log
+  line carrying the same request ID (`app/core/request_context.py`, set by
+  a middleware in `app/main.py` and echoed back as an `X-Request-ID`
+  response header). The structured log line deliberately omits
+  `audit_log.detail` even though the DB row includes it — the DB is
+  already the access-controlled place for that context; keeping it out of
+  the log stream too is defense in depth, not a missing feature.
 - **Never logged, anywhere, at any log level**: SMTP passwords (local or
   upstream), `ENCRYPTION_KEY`, session tokens, TOTP secrets, or raw
-  Authorization/cookie headers.
+  Authorization/cookie headers. `record_audit`'s `detail` parameter is
+  documented as plain/already-safe-to-log values only (IDs, names,
+  booleans, addresses) — enforced by convention and by
+  `test_audit_log.py::test_audit_log_never_contains_a_raw_password`, not a
+  runtime redaction step.
 - Postfix's own logs (which the mail-log ingester parses for
   [database-schema.md](database-schema.md)'s `mail_log` table) never contain
   credentials either — Postfix does not log SASL passwords, only the

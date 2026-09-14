@@ -1,6 +1,8 @@
+import pyotp
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.encryption import encrypt_secret
 from app.core.security import hash_password
 from app.models.admin import AdminUser
 
@@ -8,8 +10,12 @@ EMAIL = "admin@example.com"
 PASSWORD = "correct horse battery staple"
 
 
-def _make_admin(db_session: Session) -> AdminUser:
-    admin = AdminUser(email=EMAIL, password_hash=hash_password(PASSWORD))
+def _make_admin(db_session: Session, totp_secret: str | None = None) -> AdminUser:
+    admin = AdminUser(
+        email=EMAIL,
+        password_hash=hash_password(PASSWORD),
+        totp_secret_encrypted=encrypt_secret(totp_secret) if totp_secret else None,
+    )
     db_session.add(admin)
     db_session.commit()
     return admin
@@ -72,6 +78,56 @@ def test_logout_with_csrf_header_revokes_session(client: TestClient, db_session:
 
     session_response = client.get("/api/auth/session")
     assert session_response.json()["authenticated"] is False
+
+
+def test_login_with_totp_enabled_and_no_code_returns_totp_required(client: TestClient, db_session: Session) -> None:
+    secret = pyotp.random_base32()
+    _make_admin(db_session, totp_secret=secret)
+    response = client.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    assert response.status_code == 200
+    assert response.json() == {"totp_required": True, "email": None}
+    # No session was actually issued — see security-model.md §5.
+    assert "session" not in response.cookies
+
+
+def test_login_with_wrong_totp_code_is_401_and_never_reaches_the_dashboard(
+    client: TestClient, db_session: Session
+) -> None:
+    secret = pyotp.random_base32()
+    _make_admin(db_session, totp_secret=secret)
+    response = client.post(
+        "/api/auth/login", json={"email": EMAIL, "password": PASSWORD, "totp_code": "000000"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid authentication code"
+    assert "session" not in response.cookies
+
+
+def test_login_with_correct_totp_code_succeeds(client: TestClient, db_session: Session) -> None:
+    secret = pyotp.random_base32()
+    _make_admin(db_session, totp_secret=secret)
+    code = pyotp.TOTP(secret).now()
+    response = client.post(
+        "/api/auth/login", json={"email": EMAIL, "password": PASSWORD, "totp_code": code}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["totp_required"] is False
+    assert body["email"] == EMAIL
+    assert "session" in response.cookies
+
+
+def test_wrong_totp_codes_are_rate_limited_like_wrong_passwords(
+    client: TestClient, db_session: Session
+) -> None:
+    secret = pyotp.random_base32()
+    _make_admin(db_session, totp_secret=secret)
+    last_response = None
+    for _ in range(6):
+        last_response = client.post(
+            "/api/auth/login", json={"email": EMAIL, "password": PASSWORD, "totp_code": "000000"}
+        )
+    assert last_response.status_code == 429
 
 
 def test_repeated_failed_logins_trigger_rate_limit(client: TestClient, db_session: Session) -> None:

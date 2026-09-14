@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.core.audit import client_ip, record_audit
 from app.core.clock import utcnow
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret, encrypt_secret
 from app.core.test_connection import test_upstream_connection
+from app.models.admin import AdminUser
 from app.models.enums import TestResult
 from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
@@ -50,7 +52,12 @@ def list_accounts(db: Session = Depends(get_db)) -> list[UpstreamAccount]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_csrf)],
 )
-def create_account(payload: UpstreamAccountCreate, db: Session = Depends(get_db)) -> UpstreamAccount:
+def create_account(
+    payload: UpstreamAccountCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> UpstreamAccount:
     account = UpstreamAccount(
         name=payload.name,
         host=payload.host,
@@ -60,6 +67,16 @@ def create_account(payload: UpstreamAccountCreate, db: Session = Depends(get_db)
         encrypted_password=_encrypt_or_503(payload.password),
     )
     db.add(account)
+    db.flush()
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="upstream_account.create",
+        target_type="upstream_account",
+        target_id=account.id,
+        detail={"name": account.name, "host": account.host},
+        ip_address=client_ip(request),
+    )
     db.commit()
     db.refresh(account)
     return account
@@ -72,7 +89,11 @@ def get_account(account_id: int, db: Session = Depends(get_db)) -> UpstreamAccou
 
 @router.patch("/{account_id}", response_model=UpstreamAccountRead, dependencies=[Depends(require_csrf)])
 def update_account(
-    account_id: int, payload: UpstreamAccountUpdate, db: Session = Depends(get_db)
+    account_id: int,
+    payload: UpstreamAccountUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ) -> UpstreamAccount:
     account = _get_or_404(db, account_id)
     data = payload.model_dump(exclude_unset=True)
@@ -81,6 +102,17 @@ def update_account(
         setattr(account, field, value)
     if password:
         account.encrypted_password = _encrypt_or_503(password)
+    changed_fields = sorted([*data.keys(), *(["password"] if password else [])])
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="upstream_account.update",
+        target_type="upstream_account",
+        target_id=account.id,
+        # Never the password itself — only which fields changed.
+        detail={"fields": changed_fields},
+        ip_address=client_ip(request),
+    )
     db.commit()
     db.refresh(account)
     return account
@@ -97,8 +129,14 @@ def delete_precheck(account_id: int, db: Session = Depends(get_db)) -> DeletePre
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
-def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
+def delete_account(
+    account_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
     account = _get_or_404(db, account_id)
+    name = account.name
     db.delete(account)
     try:
         db.commit()
@@ -109,6 +147,20 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
             "This account is still referenced by one or more senders. "
             "Reassign or delete those senders first.",
         ) from exc
+    # A separate commit, deliberately after the delete has already
+    # succeeded — auditing a delete that got rolled back (e.g. the
+    # IntegrityError above) would be recording something that never
+    # actually happened.
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="upstream_account.delete",
+        target_type="upstream_account",
+        target_id=account_id,
+        detail={"name": name},
+        ip_address=client_ip(request),
+    )
+    db.commit()
 
 
 @router.post(

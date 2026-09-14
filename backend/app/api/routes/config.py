@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.core.audit import client_ip, record_audit
 from app.core.config_generator import generate_and_apply
 from app.core.postfix_control import PostfixControlError
 from app.models.admin import AdminUser
@@ -13,7 +14,9 @@ router = APIRouter(prefix="/config", tags=["config"], dependencies=[Depends(get_
 
 @router.post("/generate", response_model=GenerationResult, dependencies=[Depends(require_csrf)])
 def generate_config(
-    db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
 ) -> GenerationResult:
     try:
         outcome = generate_and_apply(db, triggered_by_admin_id=admin.id)
@@ -23,6 +26,19 @@ def generate_config(
         # it (there was nothing to validate), and the previous config
         # stays live either way.
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    # Additive to config_generations, not a replacement for it — this is
+    # what lets a unified audit view include "who triggered generation
+    # #N" alongside every other admin action.
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="config.generate",
+        target_type="config_generation",
+        target_id=outcome.generation_id,
+        detail={"success": outcome.success, "reloaded": outcome.reloaded},
+        ip_address=client_ip(request),
+    )
+    db.commit()
     return GenerationResult(
         generation_id=outcome.generation_id,
         success=outcome.success,

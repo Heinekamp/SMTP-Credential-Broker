@@ -7,9 +7,13 @@ import { listConfigGenerations } from "../../lib/api/config";
 import { fetchHealth } from "../../lib/api/health";
 import { fetchSystemStatus } from "../../lib/api/system";
 
-// Design handoff §10's System tab. Rotate Key is a disabled control here
-// (see AdminsTab.tsx's comment — Stage 8 territory); "Postfix / System"
-// shows only what the app actually knows (no Postfix version is exposed
+// Design handoff §10's System tab. Rotate Key stays a disabled control
+// permanently, not a deferred one: security-model.md §2 makes
+// `relay rotate-encryption-key` the CLI the *only* supported way to
+// rotate the key (it needs the old/new key *files* on the host/container
+// filesystem, which a browser button click has no way to supply) — see
+// core/cli.py's rotate-encryption-key command. "Postfix / System" shows
+// only what the app actually knows (no Postfix version is exposed
 // anywhere in the API, so it's omitted rather than faked).
 export function SystemTab() {
   const { data: systemStatus } = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
@@ -26,7 +30,7 @@ export function SystemTab() {
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 10 }}>
           Used to encrypt stored upstream credentials. Never displayed, even partially.
         </p>
-        <Button variant="warn" disabled title="Lands in the Stage 8 hardening pass">
+        <Button variant="warn" disabled title="Run `relay rotate-encryption-key` from the CLI instead — it needs key files on disk, which a browser can't supply">
           Rotate Key
         </Button>
       </Card>

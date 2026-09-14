@@ -36,7 +36,7 @@ Web administration accounts. Entirely separate from SMTP credentials.
 | `id` | integer PK | |
 | `email` | text, unique, not null | login identifier |
 | `password_hash` | text, not null | Argon2id |
-| `totp_secret_encrypted` | text, nullable | encrypted the same way as upstream passwords (security-model.md §5); null = TOTP disabled |
+| `totp_secret_encrypted` | blob, nullable | encrypted the same way as upstream passwords (security-model.md §5); null = TOTP disabled |
 | `is_active` | boolean, not null, default true | disabling an admin without deleting their audit history |
 | `created_at` | timestamp, not null | |
 | `last_login_at` | timestamp, nullable | |

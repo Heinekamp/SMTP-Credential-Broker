@@ -30,7 +30,9 @@ export function Setup() {
     setSubmitting(true);
     try {
       await submitSetup(email, password);
-      await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
+      // See Login.tsx's submit() for why this must be refetchQueries, not
+      // invalidateQueries, before navigating.
+      await queryClient.refetchQueries({ queryKey: SESSION_QUERY_KEY });
       navigate("/", { replace: true });
     } catch {
       setError("Could not create the admin account.");

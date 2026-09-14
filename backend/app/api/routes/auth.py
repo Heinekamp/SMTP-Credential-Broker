@@ -1,3 +1,4 @@
+import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -5,6 +6,7 @@ from app.api.deps import get_current_admin, get_current_admin_optional, get_db, 
 from app.config import get_settings
 from app.core.clock import utcnow
 from app.core.csrf import CSRF_COOKIE_NAME, generate_csrf_token
+from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
 from app.core.rate_limit import check_rate_limit, record_login_attempt
 from app.core.security import hash_password, verify_password
 from app.core.sessions import create_session, revoke_session
@@ -83,11 +85,29 @@ def login(
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    # Real field, not a hardcoded mock — always False today because no TOTP
-    # enrollment path exists yet (this slice's scope), but it reflects
-    # actual account state and the frontend's TOTP-step UI is wired to it.
     if admin.totp_secret_encrypted is not None:
-        return LoginResponse(totp_required=True)
+        if not payload.totp_code:
+            # First phase of a two-step login — password was correct, but
+            # no code was submitted yet. Not itself a failed attempt (the
+            # frontend's "totp" stage is about to ask for one), so this
+            # doesn't count against the rate limiter.
+            return LoginResponse(totp_required=True)
+
+        try:
+            secret = decrypt_secret(admin.totp_secret_encrypted)
+        except (EncryptionKeyNotConfigured, DecryptionFailed) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+        if not pyotp.TOTP(secret).verify(payload.totp_code, valid_window=1):
+            # Brute-forcing the code is covered by the same rate limiter as
+            # brute-forcing the password — this is the only place a wrong
+            # TOTP code is actually checked, so without this the "totp
+            # required" step would have offered zero real protection.
+            record_login_attempt(
+                db, email=payload.email, admin_user_id=admin.id, ip_address=ip_address, success=False
+            )
+            db.commit()
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
 
     admin.last_login_at = utcnow()
     record_login_attempt(

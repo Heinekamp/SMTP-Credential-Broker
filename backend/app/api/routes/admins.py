@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import pyotp
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.core.audit import client_ip, record_audit
+from app.core.encryption import EncryptionKeyNotConfigured, encrypt_secret
 from app.core.security import hash_password, verify_password
 from app.models.admin import AdminUser
-from app.schemas.admin import AdminCreate, AdminRead, ChangePasswordRequest
+from app.schemas.admin import AdminCreate, AdminRead, ChangePasswordRequest, TotpConfirmRequest, TotpEnrollResponse
 
 router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_current_admin)])
+
+# The name shown alongside the account in the admin's authenticator app —
+# matches the product name the frontend's title bar shows (Titlebar.tsx).
+_TOTP_ISSUER = "SMTP Relay Console"
 
 
 def _to_read(admin: AdminUser) -> AdminRead:
@@ -27,25 +34,103 @@ def list_admins(db: Session = Depends(get_db)) -> list[AdminRead]:
 
 
 @router.post("", response_model=AdminRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_csrf)])
-def create_admin(payload: AdminCreate, db: Session = Depends(get_db)) -> AdminRead:
-    admin = AdminUser(email=payload.email, password_hash=hash_password(payload.password))
-    db.add(admin)
+def create_admin(
+    payload: AdminCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> AdminRead:
+    new_admin = AdminUser(email=payload.email, password_hash=hash_password(payload.password))
+    db.add(new_admin)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "An admin with this email already exists") from exc
-    db.refresh(admin)
-    return _to_read(admin)
+    db.refresh(new_admin)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="admin.create",
+        target_type="admin_user",
+        target_id=new_admin.id,
+        detail={"email": new_admin.email},
+        ip_address=client_ip(request),
+    )
+    db.commit()
+    return _to_read(new_admin)
 
 
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
 def change_own_password(
     payload: ChangePasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
     if not verify_password(admin.password_hash, payload.current_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect")
     admin.password_hash = hash_password(payload.new_password)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="admin.change_password",
+        target_type="admin_user",
+        target_id=admin.id,
+        ip_address=client_ip(request),
+    )
+    db.commit()
+
+
+@router.post("/me/totp/enroll", response_model=TotpEnrollResponse, dependencies=[Depends(require_csrf)])
+def enroll_totp(admin: AdminUser = Depends(get_current_admin)) -> TotpEnrollResponse:
+    """Generates a fresh secret and returns it — nothing is persisted
+    until /me/totp/confirm proves the admin actually captured it
+    correctly (stateless across the two steps by design: a wrong/lost
+    secret at this stage just means trying enrollment again, not a
+    half-enabled account)."""
+    secret = pyotp.random_base32()
+    otpauth_uri = pyotp.totp.TOTP(secret).provisioning_uri(name=admin.email, issuer_name=_TOTP_ISSUER)
+    return TotpEnrollResponse(secret=secret, otpauth_uri=otpauth_uri)
+
+
+@router.post("/me/totp/confirm", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
+def confirm_totp(
+    payload: TotpConfirmRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
+    if not pyotp.TOTP(payload.secret).verify(payload.code, valid_window=1):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication code")
+    try:
+        admin.totp_secret_encrypted = encrypt_secret(payload.secret)
+    except EncryptionKeyNotConfigured as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="admin.totp_enroll",
+        target_type="admin_user",
+        target_id=admin.id,
+        ip_address=client_ip(request),
+    )
+    db.commit()
+
+
+@router.post("/me/totp/remove", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
+def remove_totp(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
+    admin.totp_secret_encrypted = None
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="admin.totp_remove",
+        target_type="admin_user",
+        target_id=admin.id,
+        ip_address=client_ip(request),
+    )
     db.commit()

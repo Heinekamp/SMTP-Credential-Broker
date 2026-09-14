@@ -1,10 +1,18 @@
 import base64
 import os
+from pathlib import Path
 
 import typer
 
 from app.core.config_generator import generate_and_apply
-from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
+from app.core.encryption import (
+    DecryptionFailed,
+    EncryptionKeyNotConfigured,
+    decrypt_secret,
+    decrypt_with_key,
+    encrypt_with_key,
+    parse_key_file,
+)
 from app.core.health import run_health_check
 from app.core.postfix_control import PostfixControlError, queue_list
 from app.core.security import hash_password
@@ -47,6 +55,46 @@ def generate_encryption_key() -> None:
     no way to recover it later if it's lost (security-model.md §2), so
     store it somewhere durable immediately."""
     typer.echo(base64.b64encode(os.urandom(32)).decode())
+
+
+@cli.command("rotate-encryption-key")
+def rotate_encryption_key(
+    old_key_file: Path = typer.Option(..., exists=True, help="Path to the current base64-encoded 32-byte key"),
+    new_key_file: Path = typer.Option(..., exists=True, help="Path to the new base64-encoded 32-byte key"),
+) -> None:
+    """Re-encrypts every stored secret (upstream account passwords, admin
+    TOTP secrets) from the old key to the new one, in a single transaction
+    (security-model.md §2). Nothing is committed until every row has been
+    successfully decrypted with the old key and re-encrypted with the new
+    one — any failure aborts the whole operation and leaves the database
+    exactly as it was; there is no partial-rotation state."""
+    old_key = parse_key_file(old_key_file)
+    new_key = parse_key_file(new_key_file)
+
+    db = SessionLocal()
+    try:
+        accounts = db.query(UpstreamAccount).all()
+        admins_with_totp = db.query(AdminUser).filter(AdminUser.totp_secret_encrypted.is_not(None)).all()
+
+        try:
+            for account in accounts:
+                plaintext = decrypt_with_key(account.encrypted_password, old_key)
+                account.encrypted_password = encrypt_with_key(plaintext, new_key)
+            for admin in admins_with_totp:
+                plaintext = decrypt_with_key(admin.totp_secret_encrypted, old_key)
+                admin.totp_secret_encrypted = encrypt_with_key(plaintext, new_key)
+        except DecryptionFailed as exc:
+            db.rollback()
+            typer.echo(f"Rotation aborted, database left unchanged: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        db.commit()
+        typer.echo(
+            f"Rotated {len(accounts)} upstream account credential(s) and "
+            f"{len(admins_with_totp)} TOTP secret(s)."
+        )
+    finally:
+        db.close()
 
 
 @cli.command("test-upstream")

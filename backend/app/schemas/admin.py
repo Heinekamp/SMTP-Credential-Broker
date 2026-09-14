@@ -22,3 +22,18 @@ class AdminRead(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class TotpEnrollResponse(BaseModel):
+    """Nothing is persisted yet — see admins.py's /me/totp/confirm. Shown
+    to the admin as copyable text (no QR code — see the Stage 8 plan's
+    minimal-dependency rationale); most authenticator apps accept manual
+    secret entry."""
+
+    secret: str
+    otpauth_uri: str
+
+
+class TotpConfirmRequest(BaseModel):
+    secret: str
+    code: str

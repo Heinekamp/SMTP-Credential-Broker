@@ -1,3 +1,4 @@
+import pyotp
 from fastapi.testclient import TestClient
 
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, csrf_headers
@@ -66,3 +67,61 @@ def test_change_own_password_wrong_current_password_is_401(admin_client: TestCli
         headers=csrf_headers(admin_client),
     )
     assert response.status_code == 401
+
+
+def test_totp_enroll_persists_nothing(admin_client: TestClient) -> None:
+    response = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client))
+    assert response.status_code == 200
+    body = response.json()
+    assert "secret" in body
+    assert body["otpauth_uri"].startswith("otpauth://totp/")
+
+    admins = admin_client.get("/api/admins").json()
+    me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
+    assert me["totp_enabled"] is False  # enroll alone must not enable it
+
+
+def test_totp_confirm_with_wrong_code_is_401_and_does_not_enable(admin_client: TestClient) -> None:
+    enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
+    response = admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": enroll["secret"], "code": "000000"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 401
+
+    admins = admin_client.get("/api/admins").json()
+    me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
+    assert me["totp_enabled"] is False
+
+
+def test_totp_confirm_with_correct_code_enables_it(admin_client: TestClient) -> None:
+    enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
+    code = pyotp.TOTP(enroll["secret"]).now()
+    response = admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": enroll["secret"], "code": code},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 204
+
+    admins = admin_client.get("/api/admins").json()
+    me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
+    assert me["totp_enabled"] is True
+
+
+def test_totp_remove_disables_it(admin_client: TestClient) -> None:
+    enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
+    code = pyotp.TOTP(enroll["secret"]).now()
+    admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": enroll["secret"], "code": code},
+        headers=csrf_headers(admin_client),
+    )
+
+    response = admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
+    assert response.status_code == 204
+
+    admins = admin_client.get("/api/admins").json()
+    me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
+    assert me["totp_enabled"] is False

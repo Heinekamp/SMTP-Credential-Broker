@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
 from app.config import get_settings
 from app.core import postfix_control
+from app.core.audit import client_ip, record_audit
 from app.core.clock import utcnow
 from app.core.password_generation import generate_password
 from app.core.permissions import grant_permission, revoke_permission
@@ -79,7 +80,12 @@ def list_users(db: Session = Depends(get_db)) -> list[LocalUserRead]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_csrf)],
 )
-def create_user(payload: LocalUserCreate, db: Session = Depends(get_db)) -> LocalUserCreateResponse:
+def create_user(
+    payload: LocalUserCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> LocalUserCreateResponse:
     if db.query(LocalSmtpUser).filter(LocalSmtpUser.username == payload.username).one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already in use")
 
@@ -98,6 +104,15 @@ def create_user(payload: LocalUserCreate, db: Session = Depends(get_db)) -> Loca
     # behind (security-model.md §4).
     _set_sasl_or_503(user.username, password)
 
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="local_user.create",
+        target_type="local_smtp_user",
+        target_id=user.id,
+        detail={"username": user.username},
+        ip_address=client_ip(request),
+    )
     db.commit()
     db.refresh(user)
     return LocalUserCreateResponse(user=_to_read(db, user), password=password)
@@ -109,7 +124,13 @@ def get_user(user_id: int, db: Session = Depends(get_db)) -> LocalUserRead:
 
 
 @router.patch("/{user_id}", response_model=LocalUserUpdateResponse, dependencies=[Depends(require_csrf)])
-def update_user(user_id: int, payload: LocalUserUpdate, db: Session = Depends(get_db)) -> LocalUserUpdateResponse:
+def update_user(
+    user_id: int,
+    payload: LocalUserUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> LocalUserUpdateResponse:
     """`enabled` transitions are the interesting case:
 
     - true -> false ("disable"): sasldb2 entry is deleted immediately —
@@ -138,6 +159,15 @@ def update_user(user_id: int, payload: LocalUserUpdate, db: Session = Depends(ge
     if "name" in data and data["name"] is not None:
         user.name = data["name"]
 
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="local_user.update",
+        target_type="local_smtp_user",
+        target_id=user.id,
+        detail={"fields": sorted(data.keys())},
+        ip_address=client_ip(request),
+    )
     db.commit()
     db.refresh(user)
     return LocalUserUpdateResponse(user=_to_read(db, user), password=new_password)
@@ -148,12 +178,26 @@ def update_user(user_id: int, payload: LocalUserUpdate, db: Session = Depends(ge
     response_model=PasswordRevealResponse,
     dependencies=[Depends(require_csrf)],
 )
-def regenerate_password(user_id: int, db: Session = Depends(get_db)) -> PasswordRevealResponse:
+def regenerate_password(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> PasswordRevealResponse:
     user = _get_or_404(db, user_id)
     password = generate_password()
     _set_sasl_or_503(user.username, password)
     user.password_hash = hash_password(password)
     user.password_last_rotated_at = utcnow()
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="local_user.regenerate_password",
+        target_type="local_smtp_user",
+        target_id=user.id,
+        detail={"username": user.username},
+        ip_address=client_ip(request),
+    )
     db.commit()
     return PasswordRevealResponse(password=password)
 
@@ -171,10 +215,25 @@ def delete_precheck(user_id: int, db: Session = Depends(get_db)) -> DeleteUserPr
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
-def delete_user(user_id: int, db: Session = Depends(get_db)) -> None:
+def delete_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
     user = _get_or_404(db, user_id)
+    username = user.username
     _delete_sasl_or_503(user.username)  # revoke AUTH before removing bookkeeping — fail closed
     db.delete(user)  # cascades user_sender_permissions (ondelete=CASCADE)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="local_user.delete",
+        target_type="local_smtp_user",
+        target_id=user_id,
+        detail={"username": username},
+        ip_address=client_ip(request),
+    )
     db.commit()
 
 
@@ -224,13 +283,25 @@ def get_permissions(user_id: int, db: Session = Depends(get_db)) -> UserPermissi
 def grant(
     user_id: int,
     sender_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
-    _get_or_404(db, user_id)
-    if db.get(Sender, sender_id) is None:
+    user = _get_or_404(db, user_id)
+    sender = db.get(Sender, sender_id)
+    if sender is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sender not found")
     grant_permission(db, local_smtp_user_id=user_id, sender_id=sender_id, granted_by_admin_id=admin.id)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="permission.grant",
+        target_type="user_sender_permission",
+        target_id=sender_id,
+        detail={"sender": sender.address, "local_user": user.username},
+        ip_address=client_ip(request),
+    )
+    db.commit()
 
 
 @router.delete(
@@ -238,6 +309,23 @@ def grant(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_csrf)],
 )
-def revoke(user_id: int, sender_id: int, db: Session = Depends(get_db)) -> None:
-    _get_or_404(db, user_id)
+def revoke(
+    user_id: int,
+    sender_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> None:
+    user = _get_or_404(db, user_id)
+    sender = db.get(Sender, sender_id)
     revoke_permission(db, local_smtp_user_id=user_id, sender_id=sender_id)
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="permission.revoke",
+        target_type="user_sender_permission",
+        target_id=sender_id,
+        detail={"sender": sender.address if sender else None, "local_user": user.username},
+        ip_address=client_ip(request),
+    )
+    db.commit()

@@ -4,18 +4,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, StatusBadge, TextInput } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ChangePasswordModal } from "../../components/ChangePasswordModal";
+import { ConfirmModal } from "../../components/ConfirmModal";
+import { TotpEnrollModal } from "../../components/TotpEnrollModal";
 import { ApiError } from "../../lib/apiClient";
-import { createAdmin, listAdmins } from "../../lib/api/admins";
+import { createAdmin, listAdmins, removeTotp } from "../../lib/api/admins";
 import { useSession } from "../../lib/useSession";
 
 const QUERY_KEY = ["admins"];
 
-// Design handoff §10's Admins tab. TOTP Enroll/Remove and resetting
-// another admin's password are deliberately disabled controls here --
-// implementation-plan.md assigns full TOTP support to Stage 8, and no
-// admin-reset-someone-else's-password endpoint exists (only self-service
-// change, which needs the current password) -- rather than pulling that
-// scope forward, per the project's own Stage 7/8 sequencing decision.
+// Design handoff §10's Admins tab. TOTP enroll/remove and Change Password
+// are all self-service only (the backend only ever exposes /me/... for
+// these — no admin can reset another admin's password or TOTP), so they
+// only appear on the logged-in admin's own row.
 export function AdminsTab() {
   const queryClient = useQueryClient();
   const { data: session } = useSession();
@@ -26,6 +26,16 @@ export function AdminsTab() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [changingOwnPassword, setChangingOwnPassword] = useState(false);
+  const [enrollingTotp, setEnrollingTotp] = useState(false);
+  const [removingTotp, setRemovingTotp] = useState(false);
+
+  const remove = useMutation({
+    mutationFn: () => removeTotp(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setRemovingTotp(false);
+    },
+  });
 
   const create = useMutation({
     mutationFn: () => createAdmin(email, password),
@@ -120,16 +130,24 @@ export function AdminsTab() {
                   />
                 </td>
                 <td style={tdStyle}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                    <Button variant="default" disabled title="Lands in the Stage 8 hardening pass">
-                      {admin.totp_enabled ? "Remove TOTP" : "Enroll TOTP"}
-                    </Button>
-                    {admin.email === session?.email && (
+                  {admin.email === session?.email ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      {admin.totp_enabled ? (
+                        <Button variant="default" onClick={() => setRemovingTotp(true)}>
+                          Remove TOTP
+                        </Button>
+                      ) : (
+                        <Button variant="default" onClick={() => setEnrollingTotp(true)}>
+                          Enroll TOTP
+                        </Button>
+                      )}
                       <Button variant="default" onClick={() => setChangingOwnPassword(true)}>
                         Change Password
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)" }}>—</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -137,12 +155,30 @@ export function AdminsTab() {
         </table>
       )}
 
-      <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)" }}>
-        TOTP enrollment lands in the Stage 8 hardening pass.
-      </p>
-
       {changingOwnPassword && (
         <ChangePasswordModal onDone={() => setChangingOwnPassword(false)} onCancel={() => setChangingOwnPassword(false)} />
+      )}
+
+      {enrollingTotp && (
+        <TotpEnrollModal
+          onDone={() => {
+            setEnrollingTotp(false);
+            queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+          }}
+          onCancel={() => setEnrollingTotp(false)}
+        />
+      )}
+
+      {removingTotp && (
+        <ConfirmModal
+          title="Remove TOTP?"
+          body="This lowers account security — anyone with your password alone will be able to sign in."
+          confirmLabel="Remove"
+          variant="danger"
+          confirming={remove.isPending}
+          onCancel={() => setRemovingTotp(false)}
+          onConfirm={() => remove.mutate()}
+        />
       )}
     </div>
   );
