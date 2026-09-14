@@ -3,8 +3,9 @@ import smtplib
 import socket
 import ssl
 from collections.abc import Callable
-from typing import Protocol
 
+from app.core import smtp_transport
+from app.core.smtp_transport import ClientFactory, safe_quit
 from app.models.enums import TlsMode
 
 DEFAULT_TIMEOUT = 10.0
@@ -31,30 +32,7 @@ class TestConnectionResult:
         return all(step.passed for step in self.steps)
 
 
-class SmtpClient(Protocol):
-    """The subset of smtplib.SMTP / SMTP_SSL this module depends on — tests
-    substitute a fake implementing this same shape and exercise every
-    branch without a real socket or DNS lookup (testing-strategy.md §1:
-    "mockable transport layer")."""
-
-    def connect(self, host: str, port: int) -> tuple[int, bytes]: ...
-    def ehlo(self) -> tuple[int, bytes]: ...
-    def starttls(self, context: ssl.SSLContext | None = None) -> tuple[int, bytes]: ...
-    def login(self, user: str, password: str) -> tuple[int, bytes]: ...
-    def quit(self) -> tuple[int, bytes]: ...
-
-
-ClientFactory = Callable[[float], SmtpClient]
 Resolver = Callable[[str, int], object]
-
-
-def _default_client_factory(tls_mode: TlsMode) -> ClientFactory:
-    cls = smtplib.SMTP_SSL if tls_mode is TlsMode.implicit else smtplib.SMTP
-    return lambda timeout: cls(timeout=timeout)
-
-
-def _decode(message: bytes) -> str:
-    return message.decode("utf-8", errors="replace")
 
 
 def _finalize(results: dict[str, StepResult]) -> TestConnectionResult:
@@ -71,13 +49,6 @@ def _finalize(results: dict[str, StepResult]) -> TestConnectionResult:
             previous_failed = True
         steps.append(step)
     return TestConnectionResult(steps)
-
-
-def _safe_quit(client: SmtpClient) -> None:
-    try:
-        client.quit()
-    except Exception:
-        pass
 
 
 def test_upstream_connection(
@@ -104,17 +75,10 @@ def test_upstream_connection(
         return _finalize(results)
     results["DNS resolution"] = StepResult("DNS resolution", True, f"Resolved {host}")
 
-    factory = client_factory or _default_client_factory(tls_mode)
-    client = factory(timeout)
-    # smtplib only sets `_host` (which starttls() needs for TLS SNI/hostname
-    # verification) when a host is passed to the constructor itself, not
-    # when connect() is called afterward — set it explicitly since we
-    # deliberately construct with no host to control the connect step
-    # ourselves. Harmless on the fake client used in tests.
-    client._host = host
-
     try:
-        code, message = client.connect(host, port)
+        client, greeting_detail = smtp_transport.connect_and_greet(
+            host=host, port=port, tls_mode=tls_mode, timeout=timeout, client_factory=client_factory
+        )
     except ssl.SSLError as exc:
         # Implicit-TLS connect() does TCP + TLS together — a socket-level
         # OSError below means TCP itself never established, whereas an
@@ -135,7 +99,6 @@ def test_upstream_connection(
         return _finalize(results)
 
     results["TCP connection"] = StepResult("TCP connection", True, f"Connected to {host}:{port}")
-    greeting_detail = f"{code} {_decode(message)}"
 
     if tls_mode is TlsMode.implicit:
         results["TLS handshake"] = StepResult(
@@ -145,26 +108,22 @@ def test_upstream_connection(
     else:
         results["Server greeting"] = StepResult("Server greeting", True, greeting_detail)
         try:
-            client.ehlo()
-            tls_code, tls_message = client.starttls(context=ssl.create_default_context())
-            client.ehlo()
+            tls_detail = smtp_transport.upgrade_to_starttls(client)
         except (smtplib.SMTPException, ssl.SSLError, OSError, ValueError) as exc:
             # ssl.SSLError covers real handshake/certificate failures;
             # ValueError/OSError cover lower-level failures smtplib doesn't
             # wrap in an SMTPException (e.g. a bad server_hostname).
             results["TLS handshake"] = StepResult("TLS handshake", False, str(exc))
-            _safe_quit(client)
+            safe_quit(client)
             return _finalize(results)
-        results["TLS handshake"] = StepResult(
-            "TLS handshake", True, f"{tls_code} {_decode(tls_message)}"
-        )
+        results["TLS handshake"] = StepResult("TLS handshake", True, tls_detail)
 
     try:
         auth_code, auth_message = client.login(username, password)
-        results["AUTH"] = StepResult("AUTH", True, f"{auth_code} {_decode(auth_message)}")
+        results["AUTH"] = StepResult("AUTH", True, f"{auth_code} {smtp_transport.decode(auth_message)}")
     except (smtplib.SMTPException, OSError) as exc:
         results["AUTH"] = StepResult("AUTH", False, str(exc))
     finally:
-        _safe_quit(client)
+        safe_quit(client)
 
     return _finalize(results)

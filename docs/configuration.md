@@ -47,6 +47,25 @@ right level of friction.
 | `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `relay_config` volume already wires this up correctly on both sides — only change this if you've renamed that volume's mount point. |
 | `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection" or config generation). |
 
+## Scheduled testing, update checks, and alert email
+
+Unlike everything else in this document, these are **not** environment
+variables — they're admin-editable from Settings → Notifications, backed
+by the database (`relay_settings`, database-schema.md §10), so they can be
+changed without a container restart:
+
+- The upstream connection-test interval (off by default).
+- Whether the background update-checker makes any outbound calls at all
+  (GitHub for this app's own version, postfix.org for Postfix's — off by
+  default; see security-model.md §8 for why this is opt-in).
+- Alert email: recipients, which configured sender to send from, and
+  which alert kinds (relay degraded, an upstream account failing its
+  test, an available update) trigger an email.
+
+A new `RELAY_SCHEDULER_ENABLED` (default `true`) setting exists purely so
+the test suite can disable the background scheduler entirely — there's no
+reason to change it in a real deployment.
+
 ## What's *not* here
 
 Upstream SMTP account credentials, local SMTP user credentials, senders,

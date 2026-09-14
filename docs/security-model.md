@@ -197,6 +197,16 @@ bogus entry.
   [database-schema.md](database-schema.md)'s `mail_log` table) never contain
   credentials either — Postfix does not log SASL passwords, only the
   authenticated username, by design.
+- **Outbound network calls this app makes on its own** (not triggered by
+  an admin action) are all opt-in, off by default, and narrowly scoped:
+  the background update-checker (`app/core/update_check.py`) only ever
+  calls GitHub's public releases API and postfix.org's download page, and
+  only when an admin has explicitly enabled update checking
+  (`relay_settings.update_check_enabled`) — a self-hosted relay may run in
+  a locked-down or air-gapped environment, so this must never happen
+  silently. Alert email (`app/core/mailer.py`) connects directly to a
+  configured sender's own upstream provider — no new outbound destination
+  beyond what the admin has already configured as an upstream account.
 
 ## 9. Summary threat model statement
 

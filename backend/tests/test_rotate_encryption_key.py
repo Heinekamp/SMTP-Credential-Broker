@@ -20,6 +20,7 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.admin import AdminUser
 from app.models.enums import TlsMode
+from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 
 runner = CliRunner()
@@ -34,6 +35,11 @@ def _clean_shared_db() -> None:
     Base.metadata.create_all(engine)
     db = SessionLocal()
     try:
+        # senders.upstream_account_id has no ON DELETE action, so any
+        # sender left behind by another shared-engine test file (e.g.
+        # test_alert_email.py) must be cleared first, or deleting
+        # upstream_accounts below hits a FOREIGN KEY constraint failure.
+        db.query(Sender).delete()
         db.query(UpstreamAccount).delete()
         db.query(AdminUser).delete()
         db.commit()

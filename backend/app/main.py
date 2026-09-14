@@ -16,12 +16,14 @@ from app.api.routes import (
     health,
     local_users,
     mail_log,
+    notification_settings,
     queue,
     senders,
     system,
     upstream_accounts,
 )
 from app.config import get_settings
+from app.core.alert_email import alert_email_tick
 from app.core.logging_config import configure_logging
 from app.core.request_context import set_request_id
 from app.core.scheduled_tests import connection_test_tick
@@ -44,6 +46,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         tasks = [
             asyncio.create_task(run_periodic("connection_test", _POLL_SECONDS, connection_test_tick)),
             asyncio.create_task(run_periodic("update_check", _POLL_SECONDS, update_check_tick)),
+            asyncio.create_task(run_periodic("alert_email", _POLL_SECONDS, alert_email_tick)),
         ]
     yield
     for task in tasks:
@@ -77,6 +80,7 @@ app.include_router(queue.router, prefix="/api")
 app.include_router(admins.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
+app.include_router(notification_settings.router, prefix="/api")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
