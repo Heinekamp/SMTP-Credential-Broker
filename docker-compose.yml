@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    restart: unless-stopped
     volumes:
       - app_data:/data
       # Read-only from app's side: the control socket lives here (app
@@ -24,12 +25,28 @@ services:
       RELAY_ENCRYPTION_KEY_FILE: ${RELAY_ENCRYPTION_KEY_FILE:-}
     depends_on:
       - postfix
+    # A real capability check (architecture.md §7's own health endpoint),
+    # not just "the process is up" — python3 rather than curl since the
+    # base image doesn't otherwise need curl installed.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   postfix:
     build:
       context: ./postfix
+    restart: unless-stopped
     volumes:
       - relay_config:/etc/postfix/relay
+      # Overwrite with a real certificate/key for anything beyond local
+      # testing — see docs/installation.md's TLS section. Left as a named
+      # volume (not a bind mount) so a fresh deployment still works out of
+      # the box: Docker seeds it from the image's baked-in self-signed
+      # placeholder (postfix/Dockerfile) on first start.
+      - postfix_tls:/etc/postfix/tls
     environment:
       # Must match app's RELAY_SUBMISSION_HOST exactly — it's the SASL
       # realm saslpasswd2 stores credentials under, and has to agree with
@@ -38,7 +55,19 @@ services:
       RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
     ports:
       - "587:587"
+    # postfix genuinely isn't running yet on a brand-new deployment until
+    # the app container's entrypoint successfully pushes the first
+    # generated config (postfix-architecture.md §7 — nothing else starts
+    # it) — a generous start_period avoids a false "unhealthy" flap on
+    # first boot rather than reporting a real problem.
+    healthcheck:
+      test: ["CMD", "postfix", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
 volumes:
   app_data:
   relay_config:
+  postfix_tls:

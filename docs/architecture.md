@@ -237,11 +237,14 @@ A `relay` CLI (a Typer app reusing the same service layer as the API) ships
 in the `app` image so the system stays manageable if the web UI is down:
 
 ```text
-relay doctor            # runs the health checks above, human-readable
-relay validate-config   # runs the generator in dry-run mode
-relay generate-config   # forces a regeneration + apply
-relay test-upstream ID  # runs the same test-connection logic as the UI
-relay queue             # lists the Postfix queue (wraps postqueue -p)
+relay create-admin              # bootstraps an admin without the web UI
+relay generate-encryption-key   # prints a fresh base64 32-byte key
+relay rotate-encryption-key     # re-encrypts every stored secret under a new key
+relay doctor                    # runs the health checks above, human-readable
+relay validate-config           # runs the generator in dry-run mode
+relay generate-config           # forces a regeneration + apply
+relay test-upstream ID          # runs the same test-connection logic as the UI
+relay queue                     # lists the Postfix queue (wraps postqueue -j)
 ```
 
 ## 9. Major decisions and tradeoffs
