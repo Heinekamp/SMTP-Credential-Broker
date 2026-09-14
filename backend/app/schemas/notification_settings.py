@@ -6,6 +6,7 @@ class NotificationSettingsRead(BaseModel):
     update_check_enabled: bool
     notify_recipients: list[str]
     notify_sender_id: int | None
+    notify_from_name: str | None
     notify_on_health_degraded: bool
     notify_on_upstream_test_failure: bool
     notify_on_app_update_available: bool
@@ -20,6 +21,7 @@ class NotificationSettingsUpdate(BaseModel):
     update_check_enabled: bool | None = None
     notify_recipients: list[EmailStr] | None = None
     notify_sender_id: int | None = None
+    notify_from_name: str | None = None
     notify_on_health_degraded: bool | None = None
     notify_on_upstream_test_failure: bool | None = None
     notify_on_app_update_available: bool | None = None

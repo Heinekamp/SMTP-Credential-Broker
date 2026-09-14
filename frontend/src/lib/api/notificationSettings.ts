@@ -5,6 +5,7 @@ export interface NotificationSettings {
   update_check_enabled: boolean;
   notify_recipients: string[];
   notify_sender_id: number | null;
+  notify_from_name: string | null;
   notify_on_health_degraded: boolean;
   notify_on_upstream_test_failure: boolean;
   notify_on_app_update_available: boolean;

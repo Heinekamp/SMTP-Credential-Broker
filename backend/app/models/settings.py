@@ -31,6 +31,9 @@ class RelaySettings(Base):
     notify_sender_id: Mapped[int | None] = mapped_column(
         ForeignKey("senders.id", ondelete="SET NULL"), nullable=True
     )
+    # Display name for the alert email's From header (e.g. "SMTP Relay
+    # Alerts") — None means the header is just the bare sender address.
+    notify_from_name: Mapped[str | None] = mapped_column(nullable=True, default=None)
     notify_on_health_degraded: Mapped[bool] = mapped_column(nullable=False, default=True)
     notify_on_upstream_test_failure: Mapped[bool] = mapped_column(nullable=False, default=True)
     notify_on_app_update_available: Mapped[bool] = mapped_column(nullable=False, default=True)

@@ -18,6 +18,7 @@ def _to_read(settings_row) -> NotificationSettingsRead:
         update_check_enabled=settings_row.update_check_enabled,
         notify_recipients=settings_row.notify_recipients,
         notify_sender_id=settings_row.notify_sender_id,
+        notify_from_name=settings_row.notify_from_name,
         notify_on_health_degraded=settings_row.notify_on_health_degraded,
         notify_on_upstream_test_failure=settings_row.notify_on_upstream_test_failure,
         notify_on_app_update_available=settings_row.notify_on_app_update_available,

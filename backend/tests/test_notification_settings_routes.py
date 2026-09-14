@@ -17,7 +17,24 @@ def test_get_returns_defaults_on_a_fresh_install(admin_client: TestClient) -> No
     assert body["update_check_enabled"] is False
     assert body["notify_recipients"] == []
     assert body["notify_sender_id"] is None
+    assert body["notify_from_name"] is None
     assert body["notify_on_health_degraded"] is True
+
+
+def test_patch_can_set_and_clear_the_from_name(admin_client: TestClient) -> None:
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"notify_from_name": "SMTP Relay Alerts"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.json()["notify_from_name"] == "SMTP Relay Alerts"
+
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"notify_from_name": None},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.json()["notify_from_name"] is None
 
 
 def test_patch_only_changes_supplied_fields(admin_client: TestClient) -> None:

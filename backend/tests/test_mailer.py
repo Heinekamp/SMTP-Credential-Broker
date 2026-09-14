@@ -80,6 +80,35 @@ def test_sends_a_real_message_with_the_expected_headers(monkeypatch: pytest.Monk
     assert fake.ehlo_calls == 2
 
 
+def test_from_header_is_bare_address_when_no_display_name_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = _account()
+    sender = _sender(account)
+    fake = FakeSmtpClient()
+    monkeypatch.setattr("app.core.mailer.smtp_transport.connect_and_greet", lambda **kwargs: (fake, "220 hello"))
+
+    send_alert_email(sender=sender, upstream_account=account, to_addrs=["admin@example.com"], subject="s", body="b")
+
+    assert fake.sent_messages[0]["From"] == "alerts@example.com"
+
+
+def test_from_header_includes_display_name_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = _account()
+    sender = _sender(account)
+    fake = FakeSmtpClient()
+    monkeypatch.setattr("app.core.mailer.smtp_transport.connect_and_greet", lambda **kwargs: (fake, "220 hello"))
+
+    send_alert_email(
+        sender=sender,
+        upstream_account=account,
+        to_addrs=["admin@example.com"],
+        subject="s",
+        body="b",
+        from_name="SMTP Relay Alerts",
+    )
+
+    assert fake.sent_messages[0]["From"] == "SMTP Relay Alerts <alerts@example.com>"
+
+
 def test_implicit_tls_accounts_skip_the_starttls_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
     account = _account(tls_mode=TlsMode.implicit)
     sender = _sender(account)

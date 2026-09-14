@@ -43,6 +43,7 @@ export function NotificationsTab() {
   const [updateCheckEnabled, setUpdateCheckEnabled] = useState(false);
   const [recipients, setRecipients] = useState("");
   const [senderId, setSenderId] = useState("");
+  const [fromName, setFromName] = useState("");
   const [notifyHealth, setNotifyHealth] = useState(true);
   const [notifyUpstream, setNotifyUpstream] = useState(true);
   const [notifyAppUpdate, setNotifyAppUpdate] = useState(true);
@@ -55,6 +56,7 @@ export function NotificationsTab() {
     setUpdateCheckEnabled(settings.update_check_enabled);
     setRecipients(settings.notify_recipients.join(", "));
     setSenderId(settings.notify_sender_id?.toString() ?? "");
+    setFromName(settings.notify_from_name ?? "");
     setNotifyHealth(settings.notify_on_health_degraded);
     setNotifyUpstream(settings.notify_on_upstream_test_failure);
     setNotifyAppUpdate(settings.notify_on_app_update_available);
@@ -79,6 +81,7 @@ export function NotificationsTab() {
         .map((r) => r.trim())
         .filter((r) => r.length > 0),
       notify_sender_id: senderId === "" ? null : Number(senderId),
+      notify_from_name: fromName.trim() === "" ? null : fromName.trim(),
       notify_on_health_degraded: notifyHealth,
       notify_on_upstream_test_failure: notifyUpstream,
       notify_on_app_update_available: notifyAppUpdate,
@@ -130,7 +133,7 @@ export function NotificationsTab() {
         />
 
         <div style={fieldLabelStyle}>Send from</div>
-        <Select value={senderId} onChange={(e) => setSenderId(e.target.value)} style={{ width: "100%", marginBottom: 16 }}>
+        <Select value={senderId} onChange={(e) => setSenderId(e.target.value)} style={{ width: "100%", marginBottom: 12 }}>
           <option value="">— No sender configured —</option>
           {senders?.map((sender) => (
             <option key={sender.id} value={sender.id}>
@@ -138,6 +141,17 @@ export function NotificationsTab() {
             </option>
           ))}
         </Select>
+
+        <div style={fieldLabelStyle}>From name (optional)</div>
+        <TextInput
+          value={fromName}
+          onChange={(e) => setFromName(e.target.value)}
+          placeholder="SMTP Relay Alerts"
+          style={{ width: "100%", marginBottom: 16 }}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -12, marginBottom: 16 }}>
+          {'Shown as the From display name, e.g. "SMTP Relay Alerts <alerts@example.com>" instead of just the bare address.'}
+        </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={rowStyle}>

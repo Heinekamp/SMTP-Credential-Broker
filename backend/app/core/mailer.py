@@ -8,6 +8,7 @@ smtp_transport.py's shared connection-establishment rather than routing
 through this relay's own submission port with a local SMTP user."""
 
 from email.message import EmailMessage
+from email.utils import formataddr
 
 from app.core import smtp_transport
 from app.core.encryption import decrypt_secret
@@ -18,7 +19,13 @@ from app.models.upstream import UpstreamAccount
 
 
 def send_alert_email(
-    *, sender: Sender, upstream_account: UpstreamAccount, to_addrs: list[str], subject: str, body: str
+    *,
+    sender: Sender,
+    upstream_account: UpstreamAccount,
+    to_addrs: list[str],
+    subject: str,
+    body: str,
+    from_name: str | None = None,
 ) -> None:
     """Raises on any failure (decryption, connection, auth, send) — callers
     (alert_email.py) log and skip rather than crash the scheduler loop,
@@ -36,7 +43,7 @@ def send_alert_email(
         client.login(upstream_account.username, password)
 
         message = EmailMessage()
-        message["From"] = sender.address
+        message["From"] = formataddr((from_name, sender.address)) if from_name else sender.address
         message["To"] = ", ".join(to_addrs)
         message["Subject"] = subject
         message.set_content(body)

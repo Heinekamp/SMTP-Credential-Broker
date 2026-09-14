@@ -14,7 +14,8 @@ from app.core.encryption import encrypt_secret
 from app.core.settings_store import get_background_job_state, get_relay_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models.enums import TlsMode
+from app.models.enums import MailStatus, TlsMode
+from app.models.mail_log import MailLog
 from app.models.sender import Sender
 from app.models.settings import BackgroundJobState, RelaySettings
 from app.models.upstream import UpstreamAccount
@@ -25,6 +26,7 @@ def _clean_shared_db() -> None:
     Base.metadata.create_all(engine)
     db = SessionLocal()
     try:
+        db.query(MailLog).delete()
         db.query(Sender).delete()
         db.query(UpstreamAccount).delete()
         db.query(RelaySettings).delete()
@@ -206,3 +208,74 @@ def test_a_send_failure_does_not_update_state_so_it_retries_next_tick(monkeypatc
     db = SessionLocal()
     assert get_background_job_state(db).health_degraded_active is False
     db.close()
+
+
+def test_a_successful_send_writes_a_mail_log_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    sender_upstream_account_id = sender.upstream_account_id
+    _configure(db, sender_id=sender.id)
+    db.close()
+
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", lambda **kwargs: None)
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [Alert(kind="health_degraded", key="health_degraded", title="Relay is degraded", detail="d")],
+    )
+
+    _run()
+
+    db = SessionLocal()
+    entry = db.query(MailLog).one()
+    assert entry.queue_id.startswith("ALERT-")
+    assert entry.status == MailStatus.sent
+    assert entry.error is None
+    assert entry.envelope_sender == "alerts@example.com"
+    assert entry.recipients == ["admin@example.com"]
+    assert entry.upstream_account_id == sender_upstream_account_id
+    db.close()
+
+
+def test_a_failed_send_writes_a_deferred_mail_log_row_with_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    _configure(db, sender_id=sender.id)
+    db.close()
+
+    def _boom(**kwargs):
+        raise RuntimeError("smtp unreachable")
+
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", _boom)
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [Alert(kind="health_degraded", key="health_degraded", title="t", detail="d")],
+    )
+
+    _run()
+
+    db = SessionLocal()
+    entry = db.query(MailLog).one()
+    assert entry.queue_id.startswith("ALERT-")
+    assert entry.status == MailStatus.deferred
+    assert entry.error == "smtp unreachable"
+    db.close()
+
+
+def test_from_name_is_passed_through_to_send_alert_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    _configure(db, sender_id=sender.id)
+    get_relay_settings(db).notify_from_name = "SMTP Relay Alerts"
+    db.commit()
+    db.close()
+
+    sent = []
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [Alert(kind="health_degraded", key="health_degraded", title="t", detail="d")],
+    )
+
+    _run()
+
+    assert sent[0]["from_name"] == "SMTP Relay Alerts"
