@@ -10,6 +10,9 @@ export interface ButtonProps {
   onClick?: () => void;
   type?: "button" | "submit";
   style?: CSSProperties;
+  /** Standard HTML title attribute — used to explain *why* a disabled
+   * button is disabled (e.g. "lands in the Stage 8 hardening pass"). */
+  title?: string;
 }
 
 // Ported from design-system/components-reference/core/button/Button.jsx —
@@ -24,6 +27,7 @@ export function Button({
   onClick,
   type = "button",
   style,
+  title,
 }: ButtonProps) {
   const base: CSSProperties = {
     padding: "8px 14px",
@@ -74,6 +78,7 @@ export function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      title={title}
       style={{ ...base, ...variants[variant], ...activeStyle, ...style }}
     >
       {children}

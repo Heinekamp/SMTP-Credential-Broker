@@ -3,7 +3,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { AppShell } from "./components/AppShell";
-import { ComingSoon } from "./pages/ComingSoon";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
@@ -11,6 +10,7 @@ import { LocalUsersRoutes } from "./pages/local-users";
 import { MailLogRoutes } from "./pages/mail-log";
 import { Queue } from "./pages/Queue";
 import { SendersRoutes } from "./pages/senders";
+import { Settings } from "./pages/settings";
 import { UpstreamAccountsRoutes } from "./pages/upstream-accounts";
 import { fetchSetupRequired } from "./lib/api/setup";
 import { useSession } from "./lib/useSession";
@@ -58,7 +58,7 @@ export function App() {
         <Route path="/local-users/*" element={<LocalUsersRoutes />} />
         <Route path="/mail-log/*" element={<MailLogRoutes />} />
         <Route path="/queue" element={<Queue />} />
-        <Route path="/settings" element={<ComingSoon title="Settings" />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   );
