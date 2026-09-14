@@ -134,6 +134,24 @@ def generate_and_apply(db: Session, *, triggered_by_admin_id: int | None, dry_ru
             warnings=warnings,
         )
 
+    if not reload_if_main_changed:
+        # Checksum-only used to be the whole story here, but that assumes
+        # Postfix is already running with that exact config. It isn't,
+        # whenever the postfix container has restarted (a crash, a host
+        # reboot, `docker compose restart postfix`) without app's own
+        # database changing — real testing hit this: config_generations
+        # still pointed at the last-applied checksum, so a fresh,
+        # un-started Postfix process was never told to start at all, with
+        # no supported way to recover short of operating on the container
+        # directly.
+        try:
+            reload_if_main_changed = not postfix_control.status().running
+        except postfix_control.PostfixControlError:
+            # Unreachable is a separate failure mode the RPC below will
+            # hit (and report) the same way — default to attempting a
+            # start rather than silently assuming it's fine.
+            reload_if_main_changed = True
+
     result = postfix_control.apply_config(
         main_cf=main_cf, master_cf=master_cf, maps=maps, reload_if_main_changed=reload_if_main_changed
     )

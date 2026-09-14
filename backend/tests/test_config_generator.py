@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config_generator import _build_maps, generate_and_apply
 from app.core.permissions import grant_permission
-from app.core.postfix_control import ApplyConfigResult
+from app.core.postfix_control import ApplyConfigResult, PostfixControlError, PostfixStatus
 from app.models.enums import TlsMode
 from app.models.local_user import LocalSmtpUser
 from app.models.sender import Sender
@@ -163,7 +163,7 @@ def test_generation_failure_is_recorded_and_reported_without_raising(
     assert row.applied is False
 
 
-def test_reload_flag_is_true_on_first_generation_then_false_when_unchanged(
+def test_reload_flag_is_true_on_first_generation_then_false_when_unchanged_and_running(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[bool] = []
@@ -173,8 +173,48 @@ def test_reload_flag_is_true_on_first_generation_then_false_when_unchanged(
         return ApplyConfigResult(success=True, validation_detail="ok", reloaded=kwargs["reload_if_main_changed"])
 
     monkeypatch.setattr("app.core.config_generator.postfix_control.apply_config", _fake_apply)
+    monkeypatch.setattr(
+        "app.core.config_generator.postfix_control.status", lambda: PostfixStatus(running=True, detail="running")
+    )
 
     generate_and_apply(db_session, triggered_by_admin_id=None)
     generate_and_apply(db_session, triggered_by_admin_id=None)
 
     assert calls == [True, False]
+
+
+@pytest.mark.parametrize(
+    "make_status",
+    [
+        lambda: PostfixStatus(running=False, detail="not running"),
+        lambda: (_ for _ in ()).throw(PostfixControlError("unreachable")),
+    ],
+    ids=["not_running", "control_surface_unreachable"],
+)
+def test_reload_flag_stays_true_when_unchanged_but_postfix_is_not_actually_running(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch, make_status
+) -> None:
+    """A real bug found via manual testing: checksum-only used to be the
+    whole story, which assumes Postfix is already running with that exact
+    config. It isn't after the postfix container restarts (a crash, a host
+    reboot, `docker compose restart postfix`) without app's own database
+    changing — a fresh, un-started Postfix process was never told to
+    start at all, with no supported way to recover short of operating on
+    the container directly."""
+    calls: list[bool] = []
+
+    def _fake_apply(**kwargs):
+        calls.append(kwargs["reload_if_main_changed"])
+        return ApplyConfigResult(success=True, validation_detail="ok", reloaded=kwargs["reload_if_main_changed"])
+
+    monkeypatch.setattr("app.core.config_generator.postfix_control.apply_config", _fake_apply)
+
+    monkeypatch.setattr(
+        "app.core.config_generator.postfix_control.status", lambda: PostfixStatus(running=True, detail="running")
+    )
+    generate_and_apply(db_session, triggered_by_admin_id=None)
+
+    monkeypatch.setattr("app.core.config_generator.postfix_control.status", lambda: make_status())
+    generate_and_apply(db_session, triggered_by_admin_id=None)
+
+    assert calls == [True, True]

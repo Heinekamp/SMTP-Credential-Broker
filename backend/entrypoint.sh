@@ -3,6 +3,15 @@ set -e
 
 alembic upgrade head
 
+# `docker compose run --rm app relay <command>` (generate-encryption-key,
+# create-admin, rotate-encryption-key, ...) passes the command as args
+# here. Without this, ENTRYPOINT always ran the block below instead and
+# silently discarded them — the container would just boot the API server
+# in the foreground and never actually run the requested CLI command.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 # Best-effort: on a fresh `docker compose up`, the postfix container's
 # control surface may not be listening yet even though `depends_on` says
 # the container has started (that only waits for the container, not the
