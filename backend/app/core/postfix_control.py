@@ -142,6 +142,14 @@ def tail_maillog(since_offset: int) -> MaillogTail:
     )
 
 
+def version() -> str:
+    """The installed Postfix version (`postconf -h mail_version`), shown in
+    Settings alongside this app's own version — purely informational, no
+    liveness implication (see `status()` for that)."""
+    response = _call("version", {})
+    return response.get("version", "")
+
+
 def queue_list() -> list[dict]:
     """Wraps `postqueue -j` (postfix-architecture.md §9) — the live Postfix
     queue, independent of and complementary to mail_log's historical

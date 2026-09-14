@@ -16,6 +16,7 @@ from app.core.postfix_control import (
     sasl_set_user,
     status,
     tail_maillog,
+    version,
 )
 
 # AF_UNIX is what the real deployment target (Linux, inside the postfix
@@ -158,6 +159,11 @@ def test_status_not_running(control_socket) -> None:
     control_socket(lambda req: {"ok": True, "running": False, "detail": "the Postfix mail system is not running"})
     result = status()
     assert result.running is False
+
+
+def test_version_success(control_socket) -> None:
+    control_socket(lambda req: {"ok": True, "version": "3.8.6"})
+    assert version() == "3.8.6"
 
 
 def test_tail_maillog_success(control_socket) -> None:

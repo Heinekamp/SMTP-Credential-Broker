@@ -14,9 +14,7 @@ import { fetchSystemStatus } from "../../lib/api/system";
 // `relay rotate-encryption-key` the CLI the *only* supported way to
 // rotate the key (it needs the old/new key *files* on the host/container
 // filesystem, which a browser button click has no way to supply) — see
-// core/cli.py's rotate-encryption-key command. "Postfix / System" shows
-// only what the app actually knows (no Postfix version is exposed
-// anywhere in the API, so it's omitted rather than faked).
+// core/cli.py's rotate-encryption-key command.
 export function SystemTab() {
   const queryClient = useQueryClient();
   const { data: systemStatus } = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
@@ -57,6 +55,10 @@ export function SystemTab() {
 
       <Card title="Postfix / System">
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <div style={fieldLabelStyle}>Postfix Version</div>
+            <div style={{ fontSize: "var(--text-sm)" }}>{systemStatus?.postfix_version ?? "Unknown"}</div>
+          </div>
           <div>
             <div style={fieldLabelStyle}>Config Validation</div>
             <StatusBadge

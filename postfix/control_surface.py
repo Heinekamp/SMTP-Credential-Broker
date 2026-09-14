@@ -189,6 +189,15 @@ def _status(payload: dict) -> dict:
     return {"ok": True, "running": result.returncode == 0, "detail": detail}
 
 
+def _version(payload: dict) -> dict:
+    # `-h` omits the "mail_version = " prefix `postconf` would otherwise
+    # print, giving a bare version string like "3.8.6".
+    result = _run(["postconf", "-h", "mail_version"])
+    if result.returncode != 0:
+        return {"ok": False, "error": f"postconf failed: {result.stderr.strip()}"}
+    return {"ok": True, "version": result.stdout.strip()}
+
+
 def _queue_list(payload: dict) -> dict:
     # `-j`: one JSON object per queued message (Postfix 3.1+) — far more
     # reliable to parse than postqueue -p's human-oriented text table.
@@ -218,6 +227,7 @@ _HANDLERS = {
     "sasl_delete_user": _sasl_delete_user,
     "apply_config": _apply_config,
     "status": _status,
+    "version": _version,
     "tail_maillog": _tail_maillog,
     "queue_list": _queue_list,
     "queue_requeue": _queue_requeue,
