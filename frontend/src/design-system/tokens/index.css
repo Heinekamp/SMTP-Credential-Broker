@@ -19,3 +19,16 @@ body {
   background: var(--surface-page);
   color: var(--text-body);
 }
+
+/* The one animation exception in the whole design (handoff README §5's
+   Loading state) — a functional "this is still loading" signal, not
+   decoration. Nothing else in the product animates. */
+@keyframes relay-skel-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
