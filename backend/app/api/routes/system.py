@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_admin
@@ -14,4 +16,7 @@ def system_status() -> SystemStatus:
     status and config-generation history come from the existing
     /api/health and /api/config/generations endpoints instead of being
     duplicated here."""
-    return SystemStatus(encryption_key_configured=is_encryption_key_configured())
+    return SystemStatus(
+        encryption_key_configured=is_encryption_key_configured(),
+        app_version=version("relay"),
+    )

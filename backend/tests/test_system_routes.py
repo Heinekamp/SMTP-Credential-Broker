@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 from fastapi.testclient import TestClient
 
 
@@ -9,7 +11,7 @@ def test_reports_encryption_key_configured(admin_client: TestClient) -> None:
     # conftest.py sets RELAY_ENCRYPTION_KEY for the whole test session.
     response = admin_client.get("/api/system-status")
     assert response.status_code == 200
-    assert response.json() == {"encryption_key_configured": True}
+    assert response.json() == {"encryption_key_configured": True, "app_version": version("relay")}
 
 
 def test_reports_not_configured_when_key_is_missing(
@@ -21,6 +23,6 @@ def test_reports_not_configured_when_key_is_missing(
     get_settings.cache_clear()
     try:
         response = admin_client.get("/api/system-status")
-        assert response.json() == {"encryption_key_configured": False}
+        assert response.json() == {"encryption_key_configured": False, "app_version": version("relay")}
     finally:
         get_settings.cache_clear()

@@ -1,6 +1,8 @@
 import { NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import { Icon, type IconName } from "../design-system/components";
+import { fetchSystemStatus } from "../lib/api/system";
 import "./sidenav.css";
 
 const ITEMS: { to: string; label: string; icon: IconName }[] = [
@@ -18,6 +20,8 @@ const ITEMS: { to: string; label: string; icon: IconName }[] = [
 // base Icon set doesn't have — everything else (sizing, active-state
 // styling) matches the reference exactly.
 export function Sidenav() {
+  const { data: systemStatus } = useQuery({ queryKey: ["system-status"], queryFn: fetchSystemStatus });
+
   return (
     <nav
       className="relay-sidenav"
@@ -64,7 +68,7 @@ export function Sidenav() {
           fontSize: "var(--text-2xs)",
         }}
       >
-        <span className="relay-sidenav-label">v1.0.0</span>
+        <span className="relay-sidenav-label">v{systemStatus?.app_version ?? "…"}</span>
       </div>
     </nav>
   );
