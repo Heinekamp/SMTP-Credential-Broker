@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     submission_host: str = "smtp-relay.internal"
     submission_port: int = 587
 
+    # Runs the background scheduler (core/scheduler.py — scheduled
+    # connection tests, update checks, alert email) as part of the app's
+    # lifespan. Tests set this false so a TestClient's lifespan doesn't
+    # spin up real periodic tasks against a schema-less in-memory DB.
+    scheduler_enabled: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -25,6 +25,9 @@ upstream_accounts ──1:N── mail_log
 admin_users ──1:N── audit_log
 
 config_generations (standalone, references nothing — see §8)
+
+senders ──0:1── relay_settings (as the notification sender)
+background_job_state (standalone, references nothing — see §11)
 ```
 
 ## 1. `admin_users`
@@ -180,6 +183,41 @@ failures are exactly what an admin needs visibility into).
 | `target_type` / `target_id` | text / integer | polymorphic reference to the affected row |
 | `detail` | text (JSON), nullable | structured, non-secret context (never includes password fields, by the same "no field defined for it" rule as §3) |
 | `ip_address` | text, nullable | |
+
+## 10. `relay_settings`
+
+Singleton row (id fixed at 1) — every admin-editable, DB-backed setting for
+scheduled connection testing and alerting. Unlike this project's other
+tunables (`app/config.py`, env-var-only by design), these need to be
+editable from the UI without a restart, and the notification sender
+references a live `senders` row, which an env var can't express.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | Always `1` — a singleton row. |
+| `connection_test_interval_minutes` | integer, nullable | `NULL` = disabled/manual-only (the default on a fresh install, so upgrading an existing instance never silently starts periodic AUTH attempts against a real upstream provider without opt-in). |
+| `update_check_enabled` | boolean, not null, default false | Whether the background update-checker makes any outbound calls at all — off by default. |
+| `notify_recipients` | JSON array of strings, not null | Alert email recipient addresses. |
+| `notify_sender_id` | FK → `senders.id`, nullable, `ON DELETE SET NULL` | Which configured sender alert emails are sent from. |
+| `notify_on_health_degraded` / `notify_on_upstream_test_failure` / `notify_on_app_update_available` / `notify_on_postfix_update_available` | boolean, not null, default true | Per-alert-kind email toggles — four fixed, known-in-advance kinds, so booleans on one row rather than a child table. |
+| `updated_at` | timestamp, not null | |
+
+## 11. `background_job_state`
+
+Singleton row (id fixed at 1), system-only — never admin-edited, purely
+operational state for the background scheduler, matching
+`mail_log_ingest_state`'s existing pattern.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | Always `1` — a singleton row. |
+| `connection_test_last_run_at` / `update_check_last_run_at` | timestamp, nullable | When each periodic job last actually ran (not every poll tick — only ticks that did real work). |
+| `latest_app_version` / `latest_postfix_version` | text, nullable | Cached result of the last successful update check. |
+| `latest_app_version_checked_at` / `latest_postfix_version_checked_at` | timestamp, nullable | |
+| `app_update_last_emailed_version` / `postfix_update_last_emailed_version` | text, nullable | Edge-trigger state — an update email fires once per newly-seen version, not on every poll. |
+| `app_update_acknowledged_version` / `postfix_update_acknowledged_version` | text, nullable | An admin-acknowledged *version*, not a plain dismissed flag — a newer release automatically reactivates the alert. |
+| `health_degraded_active` / `upstream_test_failure_active` | boolean, not null, default false | Last-seen state per alert kind, so email only fires on a resolved→active transition. |
+| `updated_at` | timestamp, not null | |
 
 ## Notes on the one-sender-to-one-upstream default
 

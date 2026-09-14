@@ -14,6 +14,11 @@ os.environ.setdefault("RELAY_COOKIE_SECURE", "false")
 # need a real secret configured. Individual tests that need to exercise
 # EncryptionKeyNotConfigured clear this env var themselves.
 os.environ.setdefault("RELAY_ENCRYPTION_KEY", base64.b64encode(b"0" * 32).decode())
+# The scheduler (core/scheduler.py) opens its own SessionLocal() against
+# the real app.db.session engine, not the per-test tempfile db_session
+# fixture below — without this, every TestClient's lifespan would spin up
+# real background tasks against a schema-less :memory: database.
+os.environ.setdefault("RELAY_SCHEDULER_ENABLED", "false")
 
 import app.models  # noqa: F401,E402
 from app.api.deps import get_db  # noqa: E402
