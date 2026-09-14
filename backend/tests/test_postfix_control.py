@@ -14,6 +14,7 @@ from app.core.postfix_control import (
     queue_requeue,
     sasl_delete_user,
     sasl_set_user,
+    status,
     tail_maillog,
 )
 
@@ -132,6 +133,19 @@ def test_apply_config_reports_validation_failure_without_raising(control_socket)
     assert result.success is False
     assert result.reloaded is False
     assert "bogus_directive" in result.validation_detail
+
+
+def test_status_running(control_socket) -> None:
+    control_socket(lambda req: {"ok": True, "running": True, "detail": "postfix/postfix-script: is running"})
+    result = status()
+    assert result.running is True
+    assert "is running" in result.detail
+
+
+def test_status_not_running(control_socket) -> None:
+    control_socket(lambda req: {"ok": True, "running": False, "detail": "the Postfix mail system is not running"})
+    result = status()
+    assert result.running is False
 
 
 def test_tail_maillog_success(control_socket) -> None:

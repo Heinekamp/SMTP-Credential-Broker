@@ -103,6 +103,23 @@ def apply_config(
 
 
 @dataclasses.dataclass
+class PostfixStatus:
+    running: bool
+    detail: str
+
+
+def status() -> PostfixStatus:
+    """Is Postfix's master process actually running inside the postfix
+    container (architecture.md §7's health check) — a successful RPC
+    round-trip to this function already proves the control surface itself
+    is reachable; `running=False` is the separate, and entirely expected
+    on a never-yet-configured relay, question of whether `postfix start`
+    has ever succeeded (see control_surface.py's `_apply_config`)."""
+    response = _call("status", {})
+    return PostfixStatus(running=response.get("running", False), detail=response.get("detail", ""))
+
+
+@dataclasses.dataclass
 class MaillogTail:
     lines: list[str]
     new_offset: int

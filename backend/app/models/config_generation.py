@@ -23,6 +23,14 @@ class ConfigGeneration(Base):
         ForeignKey("admin_users.id"), nullable=True
     )
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Hash of the rendered *map* sources (sender_login/sender_relayhost/
+    # sasl_passwd), tracked separately from `checksum` (main.cf/master.cf
+    # only) because map-only changes are the common case and deliberately
+    # don't affect `checksum`/`reload_if_main_changed` (postfix-architecture.md
+    # §7) — health checks (§7 of architecture.md) need this second value to
+    # detect "DB state changed since the last successful generation" drift
+    # that a main/master-only checksum would miss entirely.
+    maps_checksum: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     validation_result: Mapped[ValidationResult] = mapped_column(
         str_enum(ValidationResult, "validation_result"), nullable=False
     )

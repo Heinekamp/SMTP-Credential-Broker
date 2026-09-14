@@ -162,7 +162,8 @@ failures are exactly what an admin needs visibility into).
 | `id` | integer PK | |
 | `generated_at` | timestamp, not null | |
 | `triggered_by_admin_id` | FK → `admin_users.id`, nullable | null for system/CLI-triggered generations |
-| `checksum` | text, not null | hash of the rendered output, for "did anything actually change" checks |
+| `checksum` | text, not null | hash of the rendered `main.cf`/`master.cf` output, for "did anything actually change" checks (drives `reload_triggered`) |
+| `maps_checksum` | text, not null | hash of the rendered map sources, tracked separately since map-only changes deliberately don't affect `checksum` — added in Stage 6 for health-check drift detection (architecture.md §7) |
 | `validation_result` | enum: `pass`, `fail` | |
 | `validation_detail` | text, nullable | `postconf`/`postmap` error output on failure |
 | `applied` | boolean, not null, default false | true only once the atomic install step (architecture.md §5) completed |

@@ -177,6 +177,18 @@ def _tail_maillog(payload: dict) -> dict:
     return {"ok": True, "lines": data.splitlines(), "new_offset": size, "truncated": truncated}
 
 
+def _status(payload: dict) -> dict:
+    """Backs the health-check "is Postfix's master process actually
+    running" check (architecture.md §7) — distinct from "is this control
+    surface reachable at all," which a successful RPC round-trip already
+    proves on its own. Not running is an entirely expected state before
+    the very first successful `apply_config` (see that function's
+    comment: nothing else starts Postfix), not necessarily a fault."""
+    result = _run(["postfix", "status"])
+    detail = (result.stdout + result.stderr).strip()
+    return {"ok": True, "running": result.returncode == 0, "detail": detail}
+
+
 def _queue_list(payload: dict) -> dict:
     # `-j`: one JSON object per queued message (Postfix 3.1+) — far more
     # reliable to parse than postqueue -p's human-oriented text table.
@@ -205,6 +217,7 @@ _HANDLERS = {
     "sasl_set_user": _sasl_set_user,
     "sasl_delete_user": _sasl_delete_user,
     "apply_config": _apply_config,
+    "status": _status,
     "tail_maillog": _tail_maillog,
     "queue_list": _queue_list,
     "queue_requeue": _queue_requeue,

@@ -20,6 +20,7 @@ class ConfigGenerationRead(BaseModel):
     generated_at: datetime.datetime
     triggered_by_admin_id: int | None
     checksum: str
+    maps_checksum: str
     validation_result: ValidationResult
     validation_detail: str | None
     applied: bool

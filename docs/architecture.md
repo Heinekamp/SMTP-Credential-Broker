@@ -197,15 +197,39 @@ queue implementation.
 ## 7. Health checks
 
 Per spec §28, the health endpoint must reflect actual capability, not just
-process liveness:
+process liveness. `GET /api/health` (`app/core/health.py`) runs four checks:
 
-- database reachable (a real query, not just "process is up")
-- Postfix process running (checked via the shared volume / a lightweight
-  signal file the postfix container updates, since containers don't share a
-  process namespace by default)
-- last generated configuration's validation result was a pass
-- generated maps exist and are newer than the DB's last relevant change
-  (detects "generation succeeded but was never applied" drift)
+- **Database reachable** — a real `SELECT 1`, not just "process is up."
+- **Postfix reachable and running** — via a `status` op on the control
+  surface (security-model.md §6), which wraps `postfix status`. A
+  successful RPC round-trip already proves the control surface itself is
+  reachable; "running" is the separate question of whether Postfix's
+  master process has actually started.
+- **Last config generation attempt's validation result** (`pass`/`fail`/
+  `none`) — `config_generations`' own audit trail (§5), read back rather
+  than re-derived.
+- **Config in sync with the database** — whether re-rendering the current
+  DB state right now (with no side effects, no control-surface call)
+  produces the same checksums as the last successfully applied generation.
+  Two checksums are compared, not one: `config_generations.checksum`
+  (main.cf/master.cf only) and a second `maps_checksum` (the three lookup
+  tables), since map-only changes — the common case, e.g. adding a sender —
+  deliberately don't change the first checksum at all (§5's "no
+  reload needed" design). Comparing only the first would silently miss
+  exactly the drift this check exists to catch.
+
+A relay that has never had a config successfully applied yet (a fresh
+install, before the first sender exists) reports "Postfix running" and
+"config in sync" as false but is still overall `"ok"` — that's a normal
+starting state, not a fault, and `postfix start` genuinely hasn't run yet
+in that state (nothing else starts it; see postfix-architecture.md §7). Any
+of these checks failing *after* a successful generation has happened is
+what actually degrades overall status. The endpoint always returns HTTP
+200 regardless — the body's `status` field, not the status code, carries
+health, so a plain `curl --fail` liveness probe (this project's own
+`compose-smoke` CI job) doesn't need special-casing while a real dashboard
+can still inspect per-check detail. `relay doctor` runs the identical
+check battery, human-readable, and exits non-zero when actually unhealthy.
 
 ## 8. CLI
 

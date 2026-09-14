@@ -123,3 +123,10 @@ def push_config(api: httpx.Client) -> dict:
     body = response.json()
     assert body["success"], f"config generation failed: {body}"
     return body
+
+
+def relay_cli(*args: str) -> subprocess.CompletedProcess:
+    """Runs a `relay` CLI subcommand inside the real app container — the
+    same binary an operator would use (architecture.md §8), not a
+    reimplementation of it in the test suite."""
+    return _compose_exec("app", "relay", *args)

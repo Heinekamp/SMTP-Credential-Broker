@@ -5,6 +5,7 @@ import typer
 
 from app.core.config_generator import generate_and_apply
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
+from app.core.health import run_health_check
 from app.core.postfix_control import PostfixControlError, queue_list
 from app.core.security import hash_password
 from app.core.test_connection import test_upstream_connection
@@ -140,6 +141,39 @@ def queue_cmd() -> None:
         for rcpt in entry.get("recipients", []):
             reason = f" ({rcpt['delay_reason']})" if rcpt.get("delay_reason") else ""
             typer.echo(f"    -> {rcpt.get('address', '')}{reason}")
+
+
+@cli.command("doctor")
+def doctor() -> None:
+    """Runs the same real capability checks as GET /api/health
+    (architecture.md §7), human-readable — keeps the relay diagnosable
+    without the web UI (spec §27). Exits non-zero if anything is actually
+    unhealthy (a never-configured, fresh install is reported but doesn't
+    fail this command — see core/health.py)."""
+    db = SessionLocal()
+    try:
+        report = run_health_check(db)
+
+        def _line(label: str, ok: bool, detail: str = "") -> None:
+            marker = "PASS" if ok else "FAIL"
+            suffix = f": {detail}" if detail else ""
+            typer.echo(f"[{marker}] {label}{suffix}")
+
+        _line("Database reachable", report.database.ok, report.database.detail)
+        _line("Postfix control surface reachable", report.postfix_reachable.ok, report.postfix_reachable.detail)
+        _line("Postfix running", report.postfix_running.ok, report.postfix_running.detail)
+        _line(
+            "Last config generation attempt",
+            report.last_generation_result != "fail",
+            f"result: {report.last_generation_result}",
+        )
+        _line("Config in sync with database", report.config_in_sync.ok, report.config_in_sync.detail)
+
+        typer.echo(f"Overall: {report.status}")
+        if report.status != "ok":
+            raise typer.Exit(code=1)
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

@@ -79,6 +79,22 @@ def _checksum(main_cf: str, master_cf: str) -> str:
     return hashlib.sha256((main_cf + "\0" + master_cf).encode("utf-8")).hexdigest()
 
 
+def _maps_checksum(maps: dict[str, str]) -> str:
+    joined = "\0".join(f"{name}\0{content}" for name, content in sorted(maps.items()))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def current_state_checksums(db: Session) -> tuple[str, str]:
+    """What `generate_and_apply` would produce right now (main/master
+    checksum, maps checksum), computed with no side effects and without
+    calling the control surface — used by health checks
+    (architecture.md §7) to detect "DB state changed since the last
+    successful generation" drift."""
+    main_cf, master_cf = _render_config()
+    maps, _ = _build_maps(db)
+    return _checksum(main_cf, master_cf), _maps_checksum(maps)
+
+
 @dataclasses.dataclass
 class GenerationOutcome:
     generation_id: int
@@ -99,6 +115,7 @@ def generate_and_apply(db: Session, *, triggered_by_admin_id: int | None, dry_ru
     main_cf, master_cf = _render_config()
     maps, warnings = _build_maps(db)
     checksum = _checksum(main_cf, master_cf)
+    maps_checksum = _maps_checksum(maps)
 
     last_good = (
         db.query(ConfigGeneration)
@@ -129,6 +146,7 @@ def generate_and_apply(db: Session, *, triggered_by_admin_id: int | None, dry_ru
         generated_at=utcnow(),
         triggered_by_admin_id=triggered_by_admin_id,
         checksum=checksum,
+        maps_checksum=maps_checksum,
         validation_result=ValidationResult.pass_ if result.success else ValidationResult.fail,
         validation_detail=validation_detail,
         applied=result.success,

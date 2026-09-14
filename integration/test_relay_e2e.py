@@ -14,7 +14,15 @@ import time
 
 import httpx
 import pytest
-from conftest import create_local_user, create_sender, create_upstream_account, grant, push_config, stub_deliveries
+from conftest import (
+    create_local_user,
+    create_sender,
+    create_upstream_account,
+    grant,
+    push_config,
+    relay_cli,
+    stub_deliveries,
+)
 
 SUBMISSION_HOST = "localhost"
 SUBMISSION_PORT = 1587
@@ -294,6 +302,44 @@ def test_queue_endpoint_reflects_the_real_postfix_queue(api: httpx.Client) -> No
     response = api.get("/api/queue")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_health_detects_config_drift_and_resolves_on_regeneration(api: httpx.Client, uid: str) -> None:
+    # Establish a known-good baseline first — other tests in this shared
+    # session may or may not have generated a config yet, so this pins
+    # the starting state explicitly rather than assuming it.
+    push_config(api)
+    baseline = api.get("/api/health").json()
+    assert baseline["status"] == "ok"
+    assert baseline["postfix_reachable"]["ok"] is True
+    assert baseline["postfix_running"]["ok"] is True
+    assert baseline["last_generation_result"] == "pass"
+    assert baseline["config_in_sync"]["ok"] is True
+
+    # Change DB state (a new sender) without regenerating — architecture.md
+    # §7's "generation succeeded but drifted since" case.
+    account_id = create_upstream_account(
+        api, name="STRATO health drift", username="printer@example.com", password="printer-upstream-pass"
+    )
+    create_sender(api, address=f"drift-{uid}@example.com", upstream_account_id=account_id)
+
+    drifted = api.get("/api/health").json()
+    assert drifted["status"] == "degraded"
+    assert drifted["config_in_sync"]["ok"] is False
+
+    push_config(api)
+    healed = api.get("/api/health").json()
+    assert healed["status"] == "ok"
+    assert healed["config_in_sync"]["ok"] is True
+
+
+def test_relay_doctor_cli_reports_the_same_overall_status(api: httpx.Client) -> None:
+    push_config(api)
+    result = relay_cli("doctor")
+    assert result.returncode == 0, f"relay doctor failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert "Overall: ok" in result.stdout
+    assert "[PASS] Database reachable" in result.stdout
+    assert "[PASS] Postfix running" in result.stdout
 
 
 def test_credential_rotation_old_password_fails_new_succeeds_local_user_unaffected(
