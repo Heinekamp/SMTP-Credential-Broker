@@ -7,6 +7,7 @@ import { logout } from "../lib/apiClient";
 import { fetchHealth } from "../lib/api/health";
 import { SESSION_QUERY_KEY, useSession } from "../lib/useSession";
 import { ChangePasswordModal } from "./ChangePasswordModal";
+import { NotificationBell } from "./NotificationBell";
 
 // Design handoff §3/"Notable Deviations": a custom title bar matching the
 // base Titlebar component's exact visual spec (56px, surface-card, 1px
@@ -61,6 +62,8 @@ export function Titlebar() {
             <StatusBadge status="waiting" label="CHECKING" size="sm" />
           )}
         </span>
+
+        <NotificationBell />
 
         <div style={{ position: "relative" }}>
           <button

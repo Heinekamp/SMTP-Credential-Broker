@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     admins,
+    alerts,
     auth,
     config,
     health,
@@ -75,6 +76,7 @@ app.include_router(mail_log.router, prefix="/api")
 app.include_router(queue.router, prefix="/api")
 app.include_router(admins.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
+app.include_router(alerts.router, prefix="/api")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
