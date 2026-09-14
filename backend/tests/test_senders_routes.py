@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models.local_user import LocalSmtpUser
+from app.models.local_user import LocalSmtpUser, UserSenderPermission
 from tests.conftest import csrf_headers
 
 
@@ -77,6 +77,34 @@ def test_delete_precheck_and_delete_blast_radius(admin_client: TestClient, db_se
 
     precheck = admin_client.get(f"/api/senders/{sender['id']}/delete-precheck")
     assert precheck.json() == {"allowed_local_user_names": ["InvenTree"]}
+
+
+def test_delete_succeeds_and_cascades_when_a_permission_grant_is_still_active(
+    admin_client: TestClient, db_session: Session
+) -> None:
+    """Regression test: deleting a sender with an active permission grant
+    used to crash with a 500 (SQLAlchemy's ORM tried to null out
+    user_sender_permissions.sender_id, which is part of that table's
+    composite primary key, instead of deferring to the DB's own
+    ON DELETE CASCADE — fixed by passive_deletes=True on the
+    relationship). The confirm-modal copy in the UI has always promised
+    this succeeds, so it must actually succeed."""
+    account_id = _create_upstream(admin_client)
+    sender = admin_client.post(
+        "/api/senders",
+        json={"address": "noreply@example.com", "upstream_account_id": account_id},
+        headers=csrf_headers(admin_client),
+    ).json()
+
+    db_session.add(LocalSmtpUser(name="InvenTree", username="inventree", password_hash="x"))
+    db_session.commit()
+    user = db_session.query(LocalSmtpUser).filter_by(username="inventree").one()
+    admin_client.put(f"/api/senders/{sender['id']}/permissions/{user.id}", headers=csrf_headers(admin_client))
+
+    response = admin_client.delete(f"/api/senders/{sender['id']}", headers=csrf_headers(admin_client))
+
+    assert response.status_code == 204
+    assert db_session.query(UserSenderPermission).filter_by(sender_id=sender["id"]).count() == 0
 
 
 def test_permission_grant_and_revoke_round_trip(admin_client: TestClient, db_session: Session) -> None:

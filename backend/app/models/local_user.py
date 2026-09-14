@@ -28,7 +28,14 @@ class LocalSmtpUser(Base):
     )
     password_last_rotated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
 
-    permissions: Mapped[list["UserSenderPermission"]] = relationship(back_populates="local_smtp_user")
+    # passive_deletes=True: see the identical comment on Sender.permissions
+    # (sender.py) — user_sender_permissions.local_smtp_user_id is part of
+    # that table's composite primary key, so SQLAlchemy must defer to the
+    # database's own ON DELETE CASCADE rather than trying to null it out
+    # itself.
+    permissions: Mapped[list["UserSenderPermission"]] = relationship(
+        back_populates="local_smtp_user", passive_deletes=True
+    )
 
 
 class UserSenderPermission(Base):

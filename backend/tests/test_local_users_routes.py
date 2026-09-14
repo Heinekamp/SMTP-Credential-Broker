@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
-from app.models.local_user import LocalSmtpUser
+from app.models.local_user import LocalSmtpUser, UserSenderPermission
 from tests.conftest import csrf_headers
 
 
@@ -144,6 +144,29 @@ def test_delete_revokes_sasl_before_removing_the_row(admin_client: TestClient, f
     assert response.status_code == 204
     assert fake_postfix_control[-1] == ("delete", "inventree")
     assert admin_client.get(f"/api/local-users/{user_id}").status_code == 404
+
+
+def test_delete_succeeds_and_cascades_when_a_permission_grant_is_still_active(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    """Regression test: deleting a local user with an active permission
+    grant used to crash with a 500 for the identical reason a sender
+    delete did (see test_senders_routes.py's equivalent test) —
+    user_sender_permissions.local_smtp_user_id is also part of that
+    table's composite primary key."""
+    sender_id = _create_upstream_and_sender(admin_client)
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "InvenTree", "username": "inventree"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+    admin_client.put(f"/api/local-users/{user_id}/permissions/{sender_id}", headers=csrf_headers(admin_client))
+
+    response = admin_client.delete(f"/api/local-users/{user_id}", headers=csrf_headers(admin_client))
+
+    assert response.status_code == 204
+    assert db_session.query(UserSenderPermission).filter_by(local_smtp_user_id=user_id).count() == 0
 
 
 def test_connection_details_never_include_password(admin_client: TestClient, fake_postfix_control: list) -> None:

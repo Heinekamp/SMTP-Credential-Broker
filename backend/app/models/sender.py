@@ -34,4 +34,13 @@ class Sender(Base):
     )
 
     upstream_account: Mapped["UpstreamAccount"] = relationship(back_populates="senders")
-    permissions: Mapped[list["UserSenderPermission"]] = relationship(back_populates="sender")
+    # passive_deletes=True: user_sender_permissions.sender_id is part of
+    # that table's composite primary key, and its FK already has
+    # ondelete="CASCADE" (local_user.py) with PRAGMA foreign_keys=ON set
+    # (db/session.py) — without this, SQLAlchemy's unit-of-work tries to
+    # null out that column itself before deleting the parent, which is
+    # impossible for a primary-key column and raises an AssertionError.
+    # This tells it to leave cascading to the database instead.
+    permissions: Mapped[list["UserSenderPermission"]] = relationship(
+        back_populates="sender", passive_deletes=True
+    )
