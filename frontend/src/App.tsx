@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { AppShell } from "./components/AppShell";
 import { ComingSoon } from "./pages/ComingSoon";
+import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
 import { LocalUsersRoutes } from "./pages/local-users";
@@ -49,7 +50,7 @@ export function App() {
           </RequireSession>
         }
       >
-        <Route path="/" element={<ComingSoon title="Dashboard" />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/upstream-accounts/*" element={<UpstreamAccountsRoutes />} />
         <Route path="/senders/*" element={<SendersRoutes />} />
         <Route path="/local-users/*" element={<LocalUsersRoutes />} />
