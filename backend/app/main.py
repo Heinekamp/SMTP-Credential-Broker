@@ -25,6 +25,7 @@ from app.core.logging_config import configure_logging
 from app.core.request_context import set_request_id
 from app.core.scheduled_tests import connection_test_tick
 from app.core.scheduler import run_periodic
+from app.core.update_check import update_check_tick
 
 configure_logging()
 
@@ -41,6 +42,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if get_settings().scheduler_enabled:
         tasks = [
             asyncio.create_task(run_periodic("connection_test", _POLL_SECONDS, connection_test_tick)),
+            asyncio.create_task(run_periodic("update_check", _POLL_SECONDS, update_check_tick)),
         ]
     yield
     for task in tasks:
