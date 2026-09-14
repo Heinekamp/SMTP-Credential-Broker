@@ -9,6 +9,7 @@ import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
 import { LocalUsersRoutes } from "./pages/local-users";
 import { MailLogRoutes } from "./pages/mail-log";
+import { Queue } from "./pages/Queue";
 import { SendersRoutes } from "./pages/senders";
 import { UpstreamAccountsRoutes } from "./pages/upstream-accounts";
 import { fetchSetupRequired } from "./lib/api/setup";
@@ -56,7 +57,7 @@ export function App() {
         <Route path="/senders/*" element={<SendersRoutes />} />
         <Route path="/local-users/*" element={<LocalUsersRoutes />} />
         <Route path="/mail-log/*" element={<MailLogRoutes />} />
-        <Route path="/queue" element={<ComingSoon title="Queue" />} />
+        <Route path="/queue" element={<Queue />} />
         <Route path="/settings" element={<ComingSoon title="Settings" />} />
       </Route>
     </Routes>
