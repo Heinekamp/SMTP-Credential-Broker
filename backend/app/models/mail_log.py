@@ -37,3 +37,19 @@ class MailLog(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         default=utcnow, nullable=False
     )
+
+
+class MailLogIngestState(Base):
+    """Singleton row (id fixed at 1) recording how far mail_log ingestion
+    (core/mail_log_ingest.py) has read into the postfix container's
+    maillog, so an app restart resumes from where it left off instead of
+    re-parsing the whole file or skipping whatever was written meanwhile.
+    Not part of database-schema.md's original table list (that document
+    predates log ingestion existing at all) — purely operational state,
+    not admin- or audit-relevant data."""
+
+    __tablename__ = "mail_log_ingest_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    byte_offset: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)

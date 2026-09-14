@@ -7,7 +7,7 @@ from app.models.audit import AuditLog
 from app.models.config_generation import ConfigGeneration
 from app.models.enums import MailStatus, TestResult, TlsMode, ValidationResult
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
-from app.models.mail_log import MailLog
+from app.models.mail_log import MailLog, MailLogIngestState
 from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 
@@ -23,6 +23,7 @@ __all__ = [
     "LocalSmtpUser",
     "UserSenderPermission",
     "MailLog",
+    "MailLogIngestState",
     "Sender",
     "UpstreamAccount",
 ]

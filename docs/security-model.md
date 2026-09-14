@@ -148,7 +148,8 @@ confused.
 
 `app` needs to trigger a small number of privileged actions inside the
 `postfix` container's boundary: writing generated config/maps, running
-`postmap`, running `saslpasswd2`, and (for the queue UI) running
+`postmap`, running `saslpasswd2`, reading new maillog lines for mail_log
+ingestion (postfix-architecture.md §9), and (for the queue UI) running
 `postqueue`/`postsuper`. Rather than giving `app` a shell into the `postfix`
 container, these are exposed as a minimal, purpose-built control surface
 (a small Unix-socket RPC listener inside the `postfix` container, started by

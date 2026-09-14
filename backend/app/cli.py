@@ -5,7 +5,7 @@ import typer
 
 from app.core.config_generator import generate_and_apply
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
-from app.core.postfix_control import PostfixControlError
+from app.core.postfix_control import PostfixControlError, queue_list
 from app.core.security import hash_password
 from app.core.test_connection import test_upstream_connection
 from app.db.session import SessionLocal
@@ -119,6 +119,27 @@ def generate_config() -> None:
             raise typer.Exit(code=1)
     finally:
         db.close()
+
+
+@cli.command("queue")
+def queue_cmd() -> None:
+    """Lists the live Postfix queue (wraps `postqueue -j` via the control
+    surface) — architecture.md §8, keeps the queue manageable without the
+    web UI."""
+    try:
+        entries = queue_list()
+    except PostfixControlError as exc:
+        typer.echo(f"Could not reach the Postfix control surface: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not entries:
+        typer.echo("Queue is empty.")
+        return
+    for entry in entries:
+        typer.echo(f"{entry['queue_id']}  {entry.get('queue_name', ''):10s}  {entry.get('sender', '')}")
+        for rcpt in entry.get("recipients", []):
+            reason = f" ({rcpt['delay_reason']})" if rcpt.get("delay_reason") else ""
+            typer.echo(f"    -> {rcpt.get('address', '')}{reason}")
 
 
 if __name__ == "__main__":

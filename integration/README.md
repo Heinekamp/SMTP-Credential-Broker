@@ -5,13 +5,14 @@ Drives real SMTP sessions against a real Postfix instance (the actual
 stand-in, per [docs/testing-strategy.md](../docs/testing-strategy.md) §2.
 Every test here corresponds to one of spec §25's mandatory scenarios.
 
-**Status: verified.** All 9 scenarios pass against a real Docker Desktop +
+**Status: verified.** All 12 scenarios pass against a real Docker Desktop +
 real Postfix 3.7 instance, twice in a row from a clean `down -v`/`up -d`
 (not a fluke). Getting here surfaced and fixed several real bugs that no
 amount of unit testing would have caught — see "What this caught" below.
 If you change `postfix/`, `backend/app/templates/`, or
-`backend/app/core/config_generator.py`/`postfix_control.py`, re-run this
-suite before trusting the change.
+`backend/app/core/config_generator.py`/`postfix_control.py`/
+`mail_log_parser.py`/`mail_log_ingest.py`, re-run this suite before
+trusting the change.
 
 ## Running it
 
@@ -76,3 +77,13 @@ Postfix instance (all fixed; kept here so the reasoning isn't lost):
 - **Pydantic's `EmailStr` rejects RFC 2606 reserved TLDs** (`.test`,
   `.invalid`, `.localhost`) outright — a fixture using `admin@...test`
   never got past request validation.
+- **A `master.cf` service whose name differs from its daemon logs with a
+  slash in the process tag** — `postfix/submission/smtpd[pid]`, not
+  `postfix/smtpd[pid]` — since this relay's `submission` service runs the
+  `smtpd` daemon. The mail-log parser's line regex didn't originally allow
+  a `/` there, so it silently failed to match *every* line the submission
+  service ever produces: every AUTH and every NOQUEUE reject, since
+  submission is the only port real clients use. Two new mail-log
+  ingestion tests caught this immediately (local user attribution and
+  the rejection itself were both silently absent) — see
+  postfix-architecture.md §9.

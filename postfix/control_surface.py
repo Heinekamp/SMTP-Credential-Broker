@@ -28,6 +28,7 @@ SASL_REALM = os.environ.get("RELAY_SUBMISSION_HOST", "smtp-relay.internal")
 POSTFIX_CONFIG_DIR = "/etc/postfix"
 RELAY_MAP_DIR = "/etc/postfix/relay"
 MAP_TYPE = "lmdb"
+MAILLOG_PATH = "/var/log/postfix/maillog"
 
 
 def _run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -150,10 +151,64 @@ def _apply_config(payload: dict) -> dict:
     return {"ok": True, "success": True, "validation_detail": detail, "reloaded": reloaded}
 
 
+def _tail_maillog(payload: dict) -> dict:
+    """Returns any maillog bytes written since `since_offset` (Stage 5's
+    mail_log ingestion — see backend/app/core/mail_log_ingest.py), plus the
+    new offset to pass next time. Stateless on this side by design: the
+    caller (the app container, which can be restarted independently of
+    this one) is the one that persists the offset, not this process."""
+    since_offset = payload.get("since_offset", 0)
+    try:
+        size = os.path.getsize(MAILLOG_PATH)
+    except OSError:
+        return {"ok": True, "lines": [], "new_offset": 0, "truncated": False}
+
+    # The file got smaller than our last-known offset — it was rotated or
+    # recreated out from under us (e.g. a fresh volume after a container
+    # recreate). Resume from the start rather than seeking past EOF, which
+    # would just silently return nothing forever.
+    truncated = since_offset > size
+    start = 0 if truncated else since_offset
+
+    with open(MAILLOG_PATH, encoding="utf-8", errors="replace") as f:
+        f.seek(start)
+        data = f.read()
+
+    return {"ok": True, "lines": data.splitlines(), "new_offset": size, "truncated": truncated}
+
+
+def _queue_list(payload: dict) -> dict:
+    # `-j`: one JSON object per queued message (Postfix 3.1+) — far more
+    # reliable to parse than postqueue -p's human-oriented text table.
+    result = _run(["postqueue", "-j"])
+    if result.returncode != 0:
+        return {"ok": False, "error": f"postqueue -j failed: {result.stderr.strip()}"}
+    entries = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    return {"ok": True, "entries": entries}
+
+
+def _queue_requeue(payload: dict) -> dict:
+    result = _run(["postsuper", "-r", payload["queue_id"]])
+    if result.returncode != 0:
+        return {"ok": False, "error": f"postsuper -r failed: {result.stderr.strip()}"}
+    return {"ok": True}
+
+
+def _queue_delete(payload: dict) -> dict:
+    result = _run(["postsuper", "-d", payload["queue_id"]])
+    if result.returncode != 0:
+        return {"ok": False, "error": f"postsuper -d failed: {result.stderr.strip()}"}
+    return {"ok": True}
+
+
 _HANDLERS = {
     "sasl_set_user": _sasl_set_user,
     "sasl_delete_user": _sasl_delete_user,
     "apply_config": _apply_config,
+    "tail_maillog": _tail_maillog,
+    "queue_list": _queue_list,
+    "queue_requeue": _queue_requeue,
+    "queue_delete": _queue_delete,
 }
 
 

@@ -62,11 +62,14 @@ is STRATO-specific in the generated configuration.
 ```ini
 # ── Logging ──────────────────────────────────────────────────────────
 # The postfix container has no syslog daemon; without this, every Postfix
-# log line — including fatal startup/reload errors — silently vanishes
-# instead of reaching `docker logs`. Requires a matching `postlog` service
-# entry in master.cf (§3) on Postfix 3.4+; found the hard way when its
-# absence made `postfix start` refuse to start at all.
-maillog_file = /dev/stdout
+# log line — including fatal startup/reload errors — silently vanishes.
+# Requires a matching `postlog` service entry in master.cf (§3) on Postfix
+# 3.4+; found the hard way when its absence made `postfix start` refuse to
+# start at all. A real file, not /dev/stdout directly, so the control
+# surface's `tail_maillog` op has something seekable to read for mail_log
+# ingestion (§9) — the entrypoint separately mirrors it to this
+# container's own stdout so `docker compose logs postfix` still works.
+maillog_file = /var/log/postfix/maillog
 
 # ── Identity / posture ──────────────────────────────────────────────
 myhostname = relay.internal.example.net
@@ -382,3 +385,71 @@ An authenticated client cannot relay as a sender it doesn't own because
 against `smtpd_sender_login_maps` for the declared `MAIL FROM` address on
 every message, regardless of what the client's SMTP library or the operator
 typed into a device's web form.
+
+## 9. Mail log ingestion and queue management (Stage 5)
+
+`mail_log` (database-schema.md §7) is populated by tailing and parsing
+Postfix's own log lines, matched by queue ID — the application never
+intercepts or re-implements any part of mail delivery to observe this.
+
+**Where the logs come from.** `maillog_file` (§2) points at a real file,
+`/var/log/postfix/maillog`, not `/dev/stdout` directly — a plain file is
+seekable, which a container's own stdout stream is not from the inside. The
+control surface (security-model.md §6) exposes a `tail_maillog` op that
+returns any bytes written since a caller-supplied byte offset; the app
+container is the one that persists that offset (`mail_log_ingest_state`, a
+single-row operational table, not part of the original database-schema.md
+table list), so a restart on either side resumes cleanly instead of
+re-parsing the whole file or silently dropping whatever was written in
+between. The entrypoint separately `tail -F`s the same file to this
+container's own stdout purely so `docker compose logs postfix` keeps
+working as a live operator view — nothing functional depends on that part.
+
+**Correlation strategy.** A single delivery is scattered across several log
+lines from different Postfix services, all sharing one queue ID assigned by
+`cleanup(8)`:
+
+```text
+postfix/submission/smtpd[123]: 4XYZ0001: client=..., sasl_username=printer-service
+postfix/cleanup[124]: 4XYZ0001: message-id=<...>
+postfix/qmgr[125]: 4XYZ0001: from=<printer@example.com>, size=1234, nrcpt=1
+postfix/smtp[126]: 4XYZ0001: to=<dest@example.net>, relay=host[1.2.3.4]:587, status=sent (250 ...)
+postfix/qmgr[125]: 4XYZ0001: removed
+```
+
+Rather than keeping a separate in-memory or on-disk staging area for
+in-progress correlation, `app/core/mail_log_ingest.py` uses the `mail_log`
+table itself as the staging area: every event carrying a queue ID is
+applied to the row for that queue ID, created on first sight (by whichever
+event happens to arrive first) and updated in place by every later event.
+This is naturally robust across ingestion-poll boundaries, retries that
+happen minutes apart, and app restarts, since nothing about the
+correlation lives anywhere other than the row an admin already wants to
+watch update live (`queued` → `sent`/`deferred`/`bounced`).
+
+A message rejected before ever being queued (`NOQUEUE: reject: ...` — the
+`smtpd_sender_login_maps`/`reject_sender_login_mismatch` case from §6/§8)
+gets a synthetic `REJECT-<random>` queue ID instead, since Postfix never
+assigns one to a message it never queued.
+
+**A real bug this found**: a `master.cf` service whose name differs from
+its daemon — this project's `submission` service running the `smtpd`
+daemon — makes Postfix log it as `postfix/submission/smtpd[pid]`, not
+`postfix/smtpd[pid]`. The parser's line regex originally didn't allow a
+`/` in the process-tag segment, so *every* line from the submission
+service — which is every AUTH and every NOQUEUE reject this relay ever
+produces, since submission is the only port real clients use — silently
+failed to match. Caught by the mail-log integration tests
+(`integration/test_relay_e2e.py`), not by unit tests written against
+synthetic log lines that happened to assume the single-segment form.
+
+**Queue management.** `GET /api/queue` wraps `postqueue -j` (JSON output,
+Postfix 3.1+ — far more reliable to parse than `postqueue -p`'s
+human-oriented text table); retry and delete wrap `postsuper -r`/`-d`
+respectively. All three are additional control-surface ops, run inside the
+`postfix` container the same way `apply_config` and the `sasl_*` ops are —
+`app` still never gets a shell in that container. The live queue and
+`mail_log`'s history are deliberately independent views: a message can be
+sitting in the deferred queue, actively retrying on Postfix's own backoff
+schedule, with `mail_log` still only reflecting its most recent attempt's
+outcome.

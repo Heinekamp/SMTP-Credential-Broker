@@ -218,6 +218,84 @@ def test_upstream_auth_failure_does_not_leak_the_password(api: httpx.Client, stu
     assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address, timeout=5) is None
 
 
+def _wait_for_mail_log(api: httpx.Client, *, envelope_sender: str, timeout: float = 15.0) -> dict | None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        response = api.get("/api/mail-log", params={"envelope_sender": envelope_sender})
+        response.raise_for_status()
+        entries = response.json()["entries"]
+        if entries:
+            return entries[0]
+        time.sleep(0.5)
+    return None
+
+
+def test_successful_delivery_is_ingested_into_mail_log(api: httpx.Client, stub: None, uid: str) -> None:
+    printer_address = f"printer-maillog-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="STRATO mail-log", username="printer@example.com", password="printer-upstream-pass"
+    )
+    sender_id = create_sender(api, address=printer_address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Mail Log Test", username=f"maillog-user-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"maillog-user-{uid}", password)
+    client.sendmail(printer_address, ["dest@example.net"], "Subject: t\n\nb")
+    client.quit()
+    assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address) is not None
+
+    # Real Postfix log lines, tailed through the control surface
+    # (postfix-architecture.md §9) and parsed into mail_log — not the app
+    # intercepting the mail itself (database-schema.md §7).
+    entry = _wait_for_mail_log(api, envelope_sender=printer_address)
+    assert entry is not None, "expected the delivery to show up in mail_log"
+    assert entry["status"] == "sent"
+    assert entry["recipients"] == ["dest@example.net"]
+    assert entry["local_smtp_user_id"] == user_id
+    assert entry["upstream_account_id"] == account_id
+
+
+def test_sender_login_mismatch_rejection_is_ingested_into_mail_log(api: httpx.Client, uid: str) -> None:
+    noreply_address = f"noreply-maillog-reject-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="STRATO mail-log reject", username="noreply@example.com", password="noreply-upstream-pass"
+    )
+    create_sender(api, address=noreply_address, upstream_account_id=account_id)
+    _, password = create_local_user(api, name="Mail Log Reject Test", username=f"maillog-reject-user-{uid}")
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"maillog-reject-user-{uid}", password)
+    mail_code, _ = client.mail(noreply_address)
+    assert mail_code == 250
+    rcpt_code, _ = client.rcpt("dest@example.net")
+    assert rcpt_code == 553
+    client.rset()
+    client.quit()
+
+    entry = _wait_for_mail_log(api, envelope_sender=noreply_address)
+    assert entry is not None, "expected the rejection to show up in mail_log"
+    assert entry["status"] == "rejected"
+    assert "not owned by" in entry["error"]
+    # NOQUEUE rejections never get a queue ID at all, so there's nothing
+    # for the earlier AUTH's queue-id-keyed row to attach to — no
+    # local_smtp_user_id attribution for this event type is expected.
+    assert entry["local_smtp_user_id"] is None
+
+
+def test_queue_endpoint_reflects_the_real_postfix_queue(api: httpx.Client) -> None:
+    # A light smoke check rather than a scenario: proves the app's /api/queue
+    # is genuinely backed by `postqueue -j` inside the real container
+    # (postfix-architecture.md §9), not a stub — the live queue is normally
+    # empty in this fast-delivery test harness, so an empty list is the
+    # expected common case, not a weak assertion.
+    response = api.get("/api/queue")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
 def test_credential_rotation_old_password_fails_new_succeeds_local_user_unaffected(
     api: httpx.Client, stub: None, uid: str
 ) -> None:

@@ -1,0 +1,100 @@
+from app.core.mail_log_parser import parse_line
+from app.models.enums import MailStatus
+
+_AUTH_LINE = (
+    "Sep 14 10:00:00 relay postfix/smtpd[123]: 4XYZ123456: client=unknown[172.20.0.1], "
+    "sasl_method=PLAIN, sasl_username=printer-service"
+)
+_ENQUEUED_LINE = (
+    "Sep 14 10:00:00 relay postfix/qmgr[125]: 4XYZ123456: from=<printer@example.com>, "
+    "size=1234, nrcpt=1 (queue active)"
+)
+_SENT_LINE = (
+    "Sep 14 10:00:01 relay postfix/smtp[126]: 4XYZ123456: to=<dest@example.net>, "
+    "relay=upstream-stub[172.20.0.5]:2525, delay=0.5, delays=0.1/0/0.2/0.2, dsn=2.0.0, "
+    "status=sent (250 2.0.0 Ok: queued as ABC123)"
+)
+_DEFERRED_LINE = (
+    "Sep 14 10:00:01 relay postfix/smtp[126]: 4XYZ123456: to=<dest@example.net>, "
+    "relay=upstream-stub[172.20.0.5]:2525, delay=1.2, delays=0.1/0/0.2/0.9, dsn=4.7.8, "
+    "status=deferred (host upstream-stub[172.20.0.5] said: 454 4.7.8 Authentication failed)"
+)
+_BOUNCED_LINE = (
+    "Sep 14 10:00:01 relay postfix/smtp[126]: 4XYZ123456: to=<dest@example.net>, "
+    "relay=none, delay=0.1, dsn=5.1.1, status=bounced (host upstream-stub said: 550 5.1.1 unknown user)"
+)
+_REMOVED_LINE = "Sep 14 10:00:01 relay postfix/qmgr[125]: 4XYZ123456: removed"
+_NOQUEUE_REJECT_LINE = (
+    "Sep 14 10:00:00 relay postfix/smtpd[123]: NOQUEUE: reject: RCPT from unknown[172.20.0.1]: "
+    "553 5.7.1 <noreply@example.com>: Sender address rejected: not owned by user diag-user; "
+    "from=<noreply@example.com> to=<dest@example.net> proto=ESMTP helo=<client>"
+)
+_IGNORED_LINE = "Sep 14 10:00:00 relay postfix/smtpd[123]: connect from unknown[172.20.0.1]"
+
+
+def test_auth_line_is_parsed() -> None:
+    event = parse_line(_AUTH_LINE)
+    assert event is not None
+    assert event.kind == "auth"
+    assert event.queue_id == "4XYZ123456"
+    assert event.sasl_username == "printer-service"
+
+
+def test_enqueued_line_is_parsed() -> None:
+    event = parse_line(_ENQUEUED_LINE)
+    assert event is not None
+    assert event.kind == "enqueued"
+    assert event.queue_id == "4XYZ123456"
+    assert event.envelope_sender == "printer@example.com"
+
+
+def test_sent_delivery_line_is_parsed() -> None:
+    event = parse_line(_SENT_LINE)
+    assert event is not None
+    assert event.kind == "delivery"
+    assert event.queue_id == "4XYZ123456"
+    assert event.recipient == "dest@example.net"
+    assert event.status == MailStatus.sent
+    assert event.relay_host == "upstream-stub"
+    assert event.relay_port == 2525
+    assert event.error is None
+
+
+def test_deferred_delivery_line_captures_error_detail() -> None:
+    event = parse_line(_DEFERRED_LINE)
+    assert event is not None
+    assert event.status == MailStatus.deferred
+    assert "Authentication failed" in event.error
+    # Never contains a password — security-model.md §8 (Postfix itself
+    # never logs one, but this is what the ingester actually reads).
+    assert "pass" not in event.error.lower() or "authentication failed" in event.error.lower()
+
+
+def test_bounced_delivery_line_is_parsed() -> None:
+    event = parse_line(_BOUNCED_LINE)
+    assert event is not None
+    assert event.status == MailStatus.bounced
+    assert "unknown user" in event.error
+
+
+def test_removed_line_is_not_a_recognized_event() -> None:
+    assert parse_line(_REMOVED_LINE) is None
+
+
+def test_noqueue_reject_is_parsed() -> None:
+    event = parse_line(_NOQUEUE_REJECT_LINE)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.queue_id is None
+    assert event.envelope_sender == "noreply@example.com"
+    assert event.recipient == "dest@example.net"
+    assert "not owned by user diag-user" in event.error
+    assert event.error.startswith("553")
+
+
+def test_irrelevant_lines_are_ignored() -> None:
+    assert parse_line(_IGNORED_LINE) is None
+
+
+def test_garbage_line_is_ignored() -> None:
+    assert parse_line("this is not a postfix log line at all") is None

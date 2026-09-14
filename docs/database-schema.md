@@ -138,6 +138,20 @@ ever stored** (spec §19).
 Indexed on `(timestamp)`, `(envelope_sender)`, `(local_smtp_user_id)`,
 `(status)` to support the filtering required by spec §19.
 
+### 7a. `mail_log_ingest_state`
+
+Added in Stage 5, alongside the ingestion pipeline that populates
+`mail_log` itself (postfix-architecture.md §9) — not part of this
+document's original table list, since log ingestion didn't exist yet when
+this document was first written. Purely operational state, not
+admin-facing or audit-relevant data.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | Always `1` — a singleton row. |
+| `byte_offset` | integer, not null | How far into the postfix container's maillog ingestion has read; lets an app restart resume instead of re-parsing the whole file or skipping whatever was written meanwhile. |
+| `updated_at` | timestamp, not null | |
+
 ## 8. `config_generations`
 
 One row per attempted configuration generation (not just successful ones —

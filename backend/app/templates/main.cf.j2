@@ -5,11 +5,14 @@
 
 # ── Logging ──────────────────────────────────────────────────────────
 # This container has no syslog daemon — without this, every Postfix log
-# line (including fatal startup/reload errors) silently vanishes instead
-# of reaching `docker logs`. Postfix 3.4+ can log directly to a file/pipe
-# instead of syslog; /dev/stdout makes `docker compose logs postfix` the
-# operator's log view, which is the standard container logging pattern.
-maillog_file = /dev/stdout
+# line (including fatal startup/reload errors) silently vanishes. Postfix
+# 3.4+ can log directly to a file/pipe instead of syslog. A real file
+# (rather than /dev/stdout directly) is required so the control surface's
+# `tail_maillog` op (security-model.md §6) has something seekable to read
+# for mail_log ingestion (docs/postfix-architecture.md §9) — the
+# entrypoint separately `tail -F`s this file to stdout so `docker compose
+# logs postfix` keeps working as the operator's live log view too.
+maillog_file = /var/log/postfix/maillog
 
 # ── Identity / posture ──────────────────────────────────────────────
 myhostname = {{ myhostname }}

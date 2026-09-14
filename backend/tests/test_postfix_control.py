@@ -6,7 +6,16 @@ from collections.abc import Callable, Generator
 import pytest
 
 from app.config import get_settings
-from app.core.postfix_control import PostfixControlError, apply_config, sasl_delete_user, sasl_set_user
+from app.core.postfix_control import (
+    PostfixControlError,
+    apply_config,
+    queue_delete,
+    queue_list,
+    queue_requeue,
+    sasl_delete_user,
+    sasl_set_user,
+    tail_maillog,
+)
 
 # AF_UNIX is what the real deployment target (Linux, inside the postfix
 # container) always has — some Windows Python builds don't expose it even
@@ -123,3 +132,34 @@ def test_apply_config_reports_validation_failure_without_raising(control_socket)
     assert result.success is False
     assert result.reloaded is False
     assert "bogus_directive" in result.validation_detail
+
+
+def test_tail_maillog_success(control_socket) -> None:
+    received = []
+    response = {"ok": True, "lines": ["line one", "line two"], "new_offset": 42, "truncated": False}
+    control_socket(lambda req: (received.append(req), response)[1])
+    result = tail_maillog(17)
+    assert received == [{"op": "tail_maillog", "since_offset": 17}]
+    assert result.lines == ["line one", "line two"]
+    assert result.new_offset == 42
+    assert result.truncated is False
+
+
+def test_queue_list_success(control_socket) -> None:
+    entries = [{"queue_id": "Q1", "sender": "a@example.com", "recipients": []}]
+    control_socket(lambda req: {"ok": True, "entries": entries})
+    assert queue_list() == entries
+
+
+def test_queue_requeue_success(control_socket) -> None:
+    received = []
+    control_socket(lambda req: (received.append(req), {"ok": True})[1])
+    queue_requeue("Q1")
+    assert received == [{"op": "queue_requeue", "queue_id": "Q1"}]
+
+
+def test_queue_delete_success(control_socket) -> None:
+    received = []
+    control_socket(lambda req: (received.append(req), {"ok": True})[1])
+    queue_delete("Q1")
+    assert received == [{"op": "queue_delete", "queue_id": "Q1"}]

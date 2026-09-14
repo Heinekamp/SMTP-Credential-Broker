@@ -100,3 +100,50 @@ def apply_config(
         validation_detail=response.get("validation_detail", ""),
         reloaded=response.get("reloaded", False),
     )
+
+
+@dataclasses.dataclass
+class MaillogTail:
+    lines: list[str]
+    new_offset: int
+    truncated: bool
+
+
+def tail_maillog(since_offset: int) -> MaillogTail:
+    """Pulls any Postfix maillog lines written since `since_offset` — the
+    read side of Stage 5's mail_log ingestion (docs/postfix-architecture.md
+    §9). The control surface, not this process, holds the actual file; this
+    process is the one that persists the returned offset across calls
+    (app/core/mail_log_ingest.py), since the postfix container's control
+    surface is deliberately stateless about anything other app-side state
+    already tracks (config_generations works the same way)."""
+    response = _call("tail_maillog", {"since_offset": since_offset})
+    return MaillogTail(
+        lines=response.get("lines", []),
+        new_offset=response.get("new_offset", 0),
+        truncated=response.get("truncated", False),
+    )
+
+
+def queue_list() -> list[dict]:
+    """Wraps `postqueue -j` (postfix-architecture.md §9) — the live Postfix
+    queue, independent of and complementary to mail_log's historical
+    record: a message can be sitting in the deferred queue with no
+    mail_log row yet reflecting its next retry outcome."""
+    response = _call("queue_list", {})
+    return response.get("entries", [])
+
+
+def queue_requeue(queue_id: str) -> None:
+    """Forces an immediate delivery attempt for one queued message
+    (`postsuper -r`), rather than waiting for Postfix's own backoff
+    schedule."""
+    _call("queue_requeue", {"queue_id": queue_id})
+
+
+def queue_delete(queue_id: str) -> None:
+    """Permanently removes one queued message (`postsuper -d`) — e.g. a
+    message stuck retrying against a since-fixed but originally
+    misconfigured sender/upstream pairing that the admin has decided isn't
+    worth redelivering."""
+    _call("queue_delete", {"queue_id": queue_id})
