@@ -1,0 +1,44 @@
+/* MH 3D Solutions & More — Type tokens.
+   Web dashboard (source of truth) uses the OS system-font stack — no custom
+   webfont is shipped over the wire (embedded-flash budget). The touchscreen
+   firmware (LVGL) renders Montserrat at fixed pixel sizes (18/20/22/24/30/42/48,
+   ESP-Firmware/main/app/ui/eez/fonts.h + implementation-status.md §1) baked into
+   flash as bitmap fonts. Montserrat is adopted here as the brand's display/
+   technical typeface for anything rendered off-device (decks, docs, marketing),
+   giving the brand one consistent "face" even though the two runtimes deliver
+   it differently. Monospace is used for raw logs/telemetry text in both the
+   PySide6 desktop tools (QTextEdit log view) and would suit firmware serial
+   console reproductions. */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---- Font families ---- */
+  --font-ui: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; /* body/UI — matches the web dashboard exactly */
+  --font-display: "Montserrat", var(--font-ui); /* brand display face — mirrors on-device Montserrat */
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; /* logs, telemetry, firmware/CSV data */
+
+  /* ---- Scale (px) — matches literal sizes found in source CSS/LVGL, not a generic 4/8 grid ---- */
+  --text-2xs: 12px;   /* table headers, .hint, .temp-label, sidenav-footer */
+  --text-xs: 13px;    /* .hint body */
+  --text-sm: 14px;    /* sidenav buttons, buttons, selects */
+  --text-base: 15px;  /* card h3 labels */
+  --text-md: 18px;    /* LVGL Montserrat 18 */
+  --text-lg: 20px;    /* .state-line, .stat-value, LVGL Montserrat 20 (profile rows) */
+  --text-xl: 24px;    /* .temp-value, LVGL Montserrat 24 */
+  --text-2xl: 30px;   /* LVGL Montserrat 30 */
+  --text-3xl: 42px;   /* LVGL Montserrat 42 — large run-monitoring numerals */
+  --text-4xl: 48px;   /* LVGL Montserrat 48 — largest on-device readouts */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --leading-tight: 1.15;
+  --leading-normal: 1.5;
+
+  /* ---- Letter-spacing (used on all-caps microcopy) ---- */
+  --tracking-label: 0.05em;
+}
+
+body { font-family: var(--font-ui); }

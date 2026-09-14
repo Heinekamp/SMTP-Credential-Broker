@@ -1,0 +1,31 @@
+/* MH 3D Solutions & More — Spacing, radius, border & shadow tokens.
+   Values are literal pixel measurements pulled from style.css — never
+   snapped to a generic 4/8 grid. */
+
+:root {
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-7: 16px;
+  --space-8: 20px;
+  --space-9: 24px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 4px;   /* inputs, bars */
+  --radius-md: 6px;   /* buttons, selects, stat tiles */
+  --radius-lg: 8px;   /* cards, key-box modal */
+
+  /* ---- Border ---- */
+  --border-width: 1px;
+  --border-style: solid; /* @kind other */
+
+  /* ---- Shadow ----
+     No source screen uses drop shadows anywhere — depth is communicated by
+     flat surface-color steps (bg → card → well → control) and 1px borders
+     only. Do not add shadows to cards/buttons; it is not this brand's
+     visual language. */
+  --shadow-none: none;
+}

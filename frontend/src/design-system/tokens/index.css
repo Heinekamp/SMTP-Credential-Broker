@@ -1,0 +1,21 @@
+@import "./colors.css";
+@import "./typography.css";
+@import "./spacing.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text-body);
+}

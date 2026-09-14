@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - app_data:/data
+      - relay_config:/shared-config # unused functionally this stage — wired ahead of Stage 4
+    ports:
+      - "8000:8000"
+    environment:
+      RELAY_DATABASE_URL: sqlite:////data/app.db
+      RELAY_COOKIE_SECURE: "true"
+    depends_on:
+      - postfix
+
+  postfix:
+    build:
+      context: ./postfix
+    volumes:
+      - relay_config:/etc/postfix/relay:ro
+
+volumes:
+  app_data:
+  relay_config:

@@ -1,0 +1,27 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# SQLite dev data
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+
+# Env files that may hold real secrets
+.env
+.env.*
+!.env.example

@@ -1,0 +1,51 @@
+/* MH 3D Solutions & More — Color tokens
+   Source of truth: ESP-Firmware/main/app/web/www_src/style.css (Reflow Oven
+   Controller web dashboard) + app/ui/eez/styles.c (LVGL touchscreen, same
+   #72bf44 accent). This is a dark-first, instrumentation/telemetry palette —
+   there is no light theme in any source product, so none is invented here. */
+
+:root {
+  /* ---- Base neutrals (dark surfaces) ---- */
+  --n-bg: #0f1420;           /* page background */
+  --n-surface: #161c2b;      /* card / panel background */
+  --n-surface-sunken: #0c101a; /* inset wells: stat tiles, bars, canvases */
+  --n-surface-raised: #202840; /* buttons, selects, inputs */
+  --n-border: #2a3040;
+
+  /* ---- Text ---- */
+  --n-text: #e6e6e6;
+  --n-text-muted: #8a93a6;
+
+  /* ---- Brand ---- */
+  --brand-green: #72bf44;    /* THE accent. Fixed company-wide, never altered per-product. */
+  --brand-green-ink: #08240a; /* text color placed on top of solid brand-green fills */
+  --brand-yellow: #ffd700;   /* Firmware's autotune/caution yellow (screwed to yellow across LVGL + web) */
+  --brand-yellow-ink: #1a1a2e;
+
+  /* ---- Semantic status (System-StateMachine-Specification.md §11.1) ----
+     Fixed mapping used verbatim across the LVGL touchscreen and web UI.
+     Do not remap per-product; a red dot must always mean the same thing. */
+  --status-idle: var(--brand-green);
+  --status-armed: #e0a030;     /* amber */
+  --status-running: #3b82f6;   /* blue */
+  --status-cooling: #22d3ee;   /* cyan */
+  --status-aborting: #d946ef;  /* magenta */
+  --status-fault: #d9534f;     /* red */
+  --status-autotune: var(--brand-yellow);
+  --status-waiting: var(--n-text-muted); /* pre-handshake / disconnected, grey */
+
+  /* ---- Feedback (non-state-machine) ---- */
+  --danger: #d9534f;
+  --warn: #e0a030;
+
+  /* ---- Semantic aliases ---- */
+  --surface-page: var(--n-bg);
+  --surface-card: var(--n-surface);
+  --surface-well: var(--n-surface-sunken);
+  --surface-control: var(--n-surface-raised);
+  --border-default: var(--n-border);
+  --text-body: var(--n-text);
+  --text-muted: var(--n-text-muted);
+  --text-on-accent: var(--brand-green-ink);
+  --accent: var(--brand-green);
+}
