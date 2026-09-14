@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     )
     rate_limit_window_seconds: int = 60 * 60
 
+    # AES-256-GCM key for upstream account passwords (security-model.md §2),
+    # base64-encoded, decoding to exactly 32 bytes. Never stored in the
+    # database. `encryption_key_file` (a Docker secret path) takes
+    # precedence over the plain env var when both are set — a mounted
+    # secret file doesn't show up in `docker inspect` the way an env var
+    # does.
+    encryption_key: str | None = None
+    encryption_key_file: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -11,6 +11,10 @@ services:
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
       RELAY_COOKIE_SECURE: "true"
+      # From the shell environment or a .env file next to this file — see
+      # .env.example. Never given a value here directly.
+      RELAY_ENCRYPTION_KEY: ${RELAY_ENCRYPTION_KEY:-}
+      RELAY_ENCRYPTION_KEY_FILE: ${RELAY_ENCRYPTION_KEY_FILE:-}
     depends_on:
       - postfix
 
