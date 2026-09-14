@@ -19,3 +19,12 @@ class LoginResponse(BaseModel):
 class SessionInfo(BaseModel):
     authenticated: bool
     email: str | None = None
+
+
+class SetupRequiredResponse(BaseModel):
+    setup_required: bool
+
+
+class SetupRequest(BaseModel):
+    email: EmailStr
+    password: str

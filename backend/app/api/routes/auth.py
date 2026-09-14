@@ -9,7 +9,7 @@ from app.core.rate_limit import check_rate_limit, record_login_attempt
 from app.core.security import hash_password, verify_password
 from app.core.sessions import create_session, revoke_session
 from app.models.admin import AdminUser
-from app.schemas.auth import LoginRequest, LoginResponse, SessionInfo
+from app.schemas.auth import LoginRequest, LoginResponse, SessionInfo, SetupRequest, SetupRequiredResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -25,6 +25,31 @@ _DUMMY_HASH = hash_password("this-is-not-a-real-password-just-a-timing-decoy")
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+def _issue_session_cookies(response: Response, db: Session, admin: AdminUser, request: Request) -> None:
+    """Shared by login's success path and /setup's bootstrap-and-log-in
+    path — both end the same way: a fresh session + CSRF cookie pair."""
+    raw_token = create_session(db, admin, _client_ip(request), request.headers.get("user-agent"))
+    db.commit()
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        raw_token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        max_age=settings.session_ttl_seconds,
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        generate_csrf_token(),
+        httponly=False,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        max_age=settings.session_ttl_seconds,
+        path="/",
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -68,27 +93,7 @@ def login(
     record_login_attempt(
         db, email=payload.email, admin_user_id=admin.id, ip_address=ip_address, success=True
     )
-    raw_token = create_session(db, admin, ip_address, request.headers.get("user-agent"))
-    db.commit()
-
-    response.set_cookie(
-        SESSION_COOKIE_NAME,
-        raw_token,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="strict",
-        max_age=settings.session_ttl_seconds,
-        path="/",
-    )
-    response.set_cookie(
-        CSRF_COOKIE_NAME,
-        generate_csrf_token(),
-        httponly=False,
-        secure=settings.cookie_secure,
-        samesite="strict",
-        max_age=settings.session_ttl_seconds,
-        path="/",
-    )
+    _issue_session_cookies(response, db, admin, request)
     return LoginResponse(totp_required=False, email=admin.email)
 
 
@@ -113,3 +118,32 @@ def session_info(admin: AdminUser | None = Depends(get_current_admin_optional)) 
     if admin is None:
         return SessionInfo(authenticated=False)
     return SessionInfo(authenticated=True, email=admin.email)
+
+
+@router.get("/setup-required", response_model=SetupRequiredResponse)
+def setup_required(db: Session = Depends(get_db)) -> SetupRequiredResponse:
+    """Public and unauthenticated by design — the frontend needs this
+    answer *before* anyone can possibly be logged in yet, to decide
+    whether to route a fresh visitor to /setup or /login."""
+    return SetupRequiredResponse(setup_required=db.query(AdminUser).count() == 0)
+
+
+@router.post("/setup", response_model=LoginResponse)
+def setup(payload: SetupRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    """Creates the first admin account and logs them straight in — the
+    only way to bootstrap an admin without shelling into the container to
+    run `relay create-admin` (Stage 1's CLI-only path). Gated strictly on
+    "no admin exists yet" so this can never become a second, ongoing
+    account-creation backdoor once a relay is actually set up. (A
+    concurrent double-submit racing past this check is an accepted,
+    negligible risk for a one-time, single-operator, first-run action —
+    not something worth a DB-level lock for.)"""
+    if db.query(AdminUser).count() > 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Setup has already been completed")
+
+    admin = AdminUser(email=payload.email, password_hash=hash_password(payload.password))
+    db.add(admin)
+    db.flush()
+    admin.last_login_at = utcnow()
+    _issue_session_cookies(response, db, admin, request)
+    return LoginResponse(totp_required=False, email=admin.email)

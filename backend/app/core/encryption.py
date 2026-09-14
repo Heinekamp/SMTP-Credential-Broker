@@ -54,6 +54,17 @@ def _load_key() -> bytes:
     return key
 
 
+def is_encryption_key_configured() -> bool:
+    """For the Settings System tab (never the key's value, just whether one
+    resolves) — reuses `_load_key`'s exact loading/validation logic rather
+    than re-checking `RELAY_ENCRYPTION_KEY`/`_FILE` a second way."""
+    try:
+        _load_key()
+    except EncryptionKeyNotConfigured:
+        return False
+    return True
+
+
 def encrypt_secret(plaintext: str) -> bytes:
     """Encrypts with AES-256-GCM. Output layout: 12-byte nonce || ciphertext
     (GCM's authentication tag is appended to the ciphertext automatically by

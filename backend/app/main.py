@@ -4,7 +4,18 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import auth, config, health, local_users, mail_log, queue, senders, upstream_accounts
+from app.api.routes import (
+    admins,
+    auth,
+    config,
+    health,
+    local_users,
+    mail_log,
+    queue,
+    senders,
+    system,
+    upstream_accounts,
+)
 
 app = FastAPI(title="Managed SMTP Relay")
 
@@ -16,6 +27,8 @@ app.include_router(local_users.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
 app.include_router(mail_log.router, prefix="/api")
 app.include_router(queue.router, prefix="/api")
+app.include_router(admins.router, prefix="/api")
+app.include_router(system.router, prefix="/api")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
