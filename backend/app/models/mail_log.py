@@ -63,4 +63,10 @@ class MailLogIngestState(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     byte_offset: Mapped[int] = mapped_column(nullable=False, default=0)
+    # Nullable: unknown until the first successful tail_maillog call ever
+    # returns one (also nullable so an upgrade from before this column
+    # existed doesn't need a backfill — see control_surface.py's
+    # _tail_maillog for why an inode is more reliable than byte_offset
+    # alone at detecting a rename-based log rotation).
+    maillog_inode: Mapped[int | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)

@@ -54,9 +54,9 @@ def _seed(db_session: Session) -> None:
 
 
 def _patch_tail(monkeypatch: pytest.MonkeyPatch, lines: list[str], truncated: bool = False) -> None:
-    def _fake_tail(since_offset: int) -> MaillogTail:
+    def _fake_tail(since_offset: int, since_inode: int | None = None) -> MaillogTail:
         consumed = sum(len(line) + 1 for line in lines)
-        return MaillogTail(lines=lines, new_offset=since_offset + consumed, truncated=truncated)
+        return MaillogTail(lines=lines, new_offset=since_offset + consumed, truncated=truncated, inode=1)
 
     monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", _fake_tail)
 
@@ -143,13 +143,13 @@ def test_concurrent_ingestion_runs_are_serialized(db_session: Session, monkeypat
     intervals: list[tuple[float, float]] = []
     intervals_lock = threading.Lock()
 
-    def fake_tail(since_offset: int) -> MaillogTail:
+    def fake_tail(since_offset: int, since_inode: int | None = None) -> MaillogTail:
         start = time.monotonic()
         time.sleep(0.05)
         end = time.monotonic()
         with intervals_lock:
             intervals.append((start, end))
-        return MaillogTail(lines=[], new_offset=since_offset, truncated=False)
+        return MaillogTail(lines=[], new_offset=since_offset, truncated=False, inode=1)
 
     monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", fake_tail)
 

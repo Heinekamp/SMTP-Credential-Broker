@@ -223,27 +223,40 @@ def _apply_config(payload: dict) -> dict:
 def _tail_maillog(payload: dict) -> dict:
     """Returns any maillog bytes written since `since_offset` (Stage 5's
     mail_log ingestion — see backend/app/core/mail_log_ingest.py), plus the
-    new offset to pass next time. Stateless on this side by design: the
-    caller (the app container, which can be restarted independently of
-    this one) is the one that persists the offset, not this process."""
+    new offset (and inode) to pass next time. Stateless on this side by
+    design: the caller (the app container, which can be restarted
+    independently of this one) is the one that persists the offset/inode,
+    not this process."""
     since_offset = payload.get("since_offset", 0)
+    since_inode = payload.get("since_inode")
     try:
-        size = os.path.getsize(MAILLOG_PATH)
+        stat_result = os.stat(MAILLOG_PATH)
     except OSError:
-        return {"ok": True, "lines": [], "new_offset": 0, "truncated": False}
+        return {"ok": True, "lines": [], "new_offset": 0, "truncated": False, "inode": None}
+    size = stat_result.st_size
+    inode = stat_result.st_ino
 
-    # The file got smaller than our last-known offset — it was rotated or
-    # recreated out from under us (e.g. a fresh volume after a container
-    # recreate). Resume from the start rather than seeking past EOF, which
-    # would just silently return nothing forever.
-    truncated = since_offset > size
+    # Prefer inode comparison when a previous inode is known — a log
+    # rotation that renames the old file and creates a new one at the
+    # same path (rather than truncating it in place) changes the inode
+    # immediately, even though the new file could grow past the old
+    # since_offset before the next poll and make a size-only comparison
+    # wrongly conclude nothing was rotated (silently skipping straight
+    # into the middle of the new file instead of starting from its
+    # beginning). Fall back to the size heuristic only when since_inode
+    # is unknown — the very first call, or an upgrade from before this
+    # existed.
+    if since_inode is not None:
+        truncated = inode != since_inode
+    else:
+        truncated = since_offset > size
     start = 0 if truncated else since_offset
 
     with open(MAILLOG_PATH, encoding="utf-8", errors="replace") as f:
         f.seek(start)
         data = f.read()
 
-    return {"ok": True, "lines": data.splitlines(), "new_offset": size, "truncated": truncated}
+    return {"ok": True, "lines": data.splitlines(), "new_offset": size, "truncated": truncated, "inode": inode}
 
 
 def _status(payload: dict) -> dict:

@@ -19,11 +19,14 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.core import mail_log_parser as parser
+from app.core.logging_config import get_logger
 from app.core.postfix_control import tail_maillog
 from app.models.enums import MailStatus
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
 from app.models.upstream import UpstreamAccount
+
+_logger = get_logger("mail_log_ingest")
 
 # ingest_new_log_lines runs on every GET /api/mail-log request (this
 # module's own docstring), with no coordination between them — two
@@ -84,7 +87,19 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
     """Returns the number of raw lines processed (not all of which
     necessarily produced an event)."""
     state = _get_state(db)
-    tail = tail_maillog(state.byte_offset)
+    tail = tail_maillog(state.byte_offset, state.maillog_inode)
+    if tail.truncated:
+        # Operator-visible signal for a log rotation/truncation — there
+        # used to be none at all, so this event (and any gap it might
+        # cause if the rotated-out bytes genuinely aren't recoverable)
+        # was invisible short of noticing missing mail_log rows.
+        _logger.warning(
+            "maillog rotated or truncated — resuming from the start of the current file "
+            "(previous offset %d, previous inode %s, new inode %s)",
+            state.byte_offset,
+            state.maillog_inode,
+            tail.inode,
+        )
 
     local_user_by_username: dict[str, int] = dict(db.query(LocalSmtpUser.username, LocalSmtpUser.id).all())
     upstream_by_host_port: dict[tuple[str, int], int] = {}
@@ -139,5 +154,6 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
                     row.upstream_account_id = account_id
 
     state.byte_offset = tail.new_offset
+    state.maillog_inode = tail.inode
     db.commit()
     return len(tail.lines)

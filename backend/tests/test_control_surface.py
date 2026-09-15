@@ -103,6 +103,77 @@ def test_existence_check_falls_back_to_true_when_sasldblistusers2_itself_fails(
     assert control_surface._sasl_user_exists("inventree") is True
 
 
+def test_tail_maillog_first_call_reports_the_current_inode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    maillog = tmp_path / "maillog"
+    maillog.write_text("line one\nline two\n", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+
+    result = control_surface._tail_maillog({"since_offset": 0, "since_inode": None})
+
+    assert result["truncated"] is False
+    assert result["lines"] == ["line one", "line two"]
+    assert result["inode"] is not None
+
+
+def test_tail_maillog_falls_back_to_size_heuristic_when_inode_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """First-ever call (or an upgrade from before maillog_inode existed)
+    has no previous inode to compare against — must still fall back to
+    detecting a genuinely-shrunk file by size."""
+    maillog = tmp_path / "maillog"
+    maillog.write_text("short\n", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+
+    result = control_surface._tail_maillog({"since_offset": 9999, "since_inode": None})
+
+    assert result["truncated"] is True
+    assert result["lines"] == ["short"]
+
+
+def test_tail_maillog_detects_rotation_via_inode_even_when_the_new_file_is_already_larger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression test for issue #31: a rename-based log rotation (the old
+    file renamed aside, a new empty one created at the same path) changes
+    the inode immediately, but the new file can grow past the old
+    since_offset before the next poll — a size-only comparison would
+    wrongly conclude nothing rotated and silently seek into the middle of
+    the new file instead of starting from its beginning."""
+    maillog = tmp_path / "maillog"
+    maillog.write_text("old file content, this is the previous log\n", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+    old_inode = control_surface._tail_maillog({"since_offset": 0, "since_inode": None})["inode"]
+    old_offset = len("old file content, this is the previous log\n")
+
+    # Simulate logrotate's rename+create: the old file goes away, a brand
+    # new one appears at the same path, and — during the window before
+    # the next poll — already grows past the old byte offset.
+    maillog.unlink()
+    maillog.write_text("x" * (old_offset + 500) + "\nnew log line\n", encoding="utf-8")
+
+    result = control_surface._tail_maillog({"since_offset": old_offset, "since_inode": old_inode})
+
+    assert result["truncated"] is True
+    assert "new log line" in result["lines"][-1] or any("new log line" in line for line in result["lines"])
+    assert result["inode"] != old_inode
+
+
+def test_tail_maillog_no_rotation_uses_the_offset_normally(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    maillog = tmp_path / "maillog"
+    maillog.write_text("first\n", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+    first = control_surface._tail_maillog({"since_offset": 0, "since_inode": None})
+
+    with open(maillog, "a", encoding="utf-8") as f:
+        f.write("second\n")
+
+    result = control_surface._tail_maillog({"since_offset": first["new_offset"], "since_inode": first["inode"]})
+
+    assert result["truncated"] is False
+    assert result["lines"] == ["second"]
+
+
 def test_validate_staged_config_catches_a_master_cf_syntax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression test: validation used to only run `postconf -n`, which
     never parses master.cf at all — a broken master.cf would sail through

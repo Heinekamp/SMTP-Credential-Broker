@@ -131,21 +131,30 @@ class MaillogTail:
     lines: list[str]
     new_offset: int
     truncated: bool
+    inode: int | None = None
 
 
-def tail_maillog(since_offset: int) -> MaillogTail:
+def tail_maillog(since_offset: int, since_inode: int | None = None) -> MaillogTail:
     """Pulls any Postfix maillog lines written since `since_offset` — the
     read side of Stage 5's mail_log ingestion (docs/postfix-architecture.md
     §9). The control surface, not this process, holds the actual file; this
-    process is the one that persists the returned offset across calls
-    (app/core/mail_log_ingest.py), since the postfix container's control
-    surface is deliberately stateless about anything other app-side state
-    already tracks (config_generations works the same way)."""
-    response = _call("tail_maillog", {"since_offset": since_offset})
+    process is the one that persists the returned offset/inode across
+    calls (app/core/mail_log_ingest.py), since the postfix container's
+    control surface is deliberately stateless about anything other
+    app-side state already tracks (config_generations works the same way).
+
+    `since_inode`, once known, lets the control surface detect a log
+    rotation that renames the old file and creates a new one (rather than
+    truncating it in place) even if the new file has already grown past
+    `since_offset` by the time of this call — a size-only comparison
+    would misread that as "nothing rotated" and silently skip straight
+    into the middle of the new file."""
+    response = _call("tail_maillog", {"since_offset": since_offset, "since_inode": since_inode})
     return MaillogTail(
         lines=response.get("lines", []),
         new_offset=response.get("new_offset", 0),
         truncated=response.get("truncated", False),
+        inode=response.get("inode"),
     )
 
 
