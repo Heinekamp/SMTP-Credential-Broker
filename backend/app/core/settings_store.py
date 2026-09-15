@@ -1,9 +1,10 @@
-"""Get-or-create-row-1 helpers for the two singleton settings tables,
+"""Get-or-create-row-1 helpers for the singleton settings tables,
 matching mail_log_ingest.py's `_get_state` pattern."""
 
 from sqlalchemy.orm import Session
 
 from app.models.settings import BackgroundJobState, RelaySettings
+from app.models.tls import TlsCertificateState
 
 
 def get_relay_settings(db: Session) -> RelaySettings:
@@ -19,6 +20,15 @@ def get_background_job_state(db: Session) -> BackgroundJobState:
     state = db.get(BackgroundJobState, 1)
     if state is None:
         state = BackgroundJobState(id=1)
+        db.add(state)
+        db.flush()
+    return state
+
+
+def get_tls_certificate_state(db: Session) -> TlsCertificateState:
+    state = db.get(TlsCertificateState, 1)
+    if state is None:
+        state = TlsCertificateState(id=1)
         db.add(state)
         db.flush()
     return state

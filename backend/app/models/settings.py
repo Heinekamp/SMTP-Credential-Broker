@@ -45,6 +45,16 @@ class RelaySettings(Base):
     # window (core/retention.py).
     mail_log_retention_days: Mapped[int | None] = mapped_column(nullable=True, default=None)
     audit_log_retention_days: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    # Let's Encrypt / DNS-01 configuration (core/acme_tls.py). Off by
+    # default — the self-signed placeholder cert stays in place until an
+    # admin explicitly opts in, same "opt-in, never silently start doing
+    # something new on upgrade" convention as everything else here.
+    tls_acme_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    tls_domain: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    tls_contact_email: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    tls_dns_provider: Mapped[str] = mapped_column(nullable=False, default="cloudflare")
+    tls_cloudflare_api_token_encrypted: Mapped[bytes | None] = mapped_column(nullable=True, default=None)
+    tls_cloudflare_zone_id: Mapped[str | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 
@@ -73,4 +83,7 @@ class BackgroundJobState(Base):
     postfix_update_acknowledged_version: Mapped[str | None] = mapped_column(nullable=True, default=None)
     health_degraded_active: Mapped[bool] = mapped_column(nullable=False, default=False)
     upstream_test_failure_active: Mapped[bool] = mapped_column(nullable=False, default=False)
+    cert_renewal_last_checked_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
+    cert_last_renewal_attempt_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
+    cert_last_renewal_error: Mapped[str | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
