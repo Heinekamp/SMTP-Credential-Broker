@@ -9,6 +9,7 @@ Only ever called when relay_settings.update_check_enabled is True — see
 update_check_tick() below, which checks that before either network call.
 """
 
+import asyncio
 import datetime
 import json
 import re
@@ -85,7 +86,7 @@ def _run_checks(db: Session) -> None:
     db.commit()
 
 
-async def update_check_tick() -> None:
+def _update_check_tick_sync() -> None:
     db = SessionLocal()
     try:
         settings_row = get_relay_settings(db)
@@ -103,3 +104,10 @@ async def update_check_tick() -> None:
         _run_checks(db)
     finally:
         db.close()
+
+
+async def update_check_tick() -> None:
+    # check_app_update/check_postfix_update are blocking urllib calls (up
+    # to a 10s timeout each) — see connection_test_tick's identical
+    # rationale for why this can't run directly on the event loop.
+    await asyncio.to_thread(_update_check_tick_sync)

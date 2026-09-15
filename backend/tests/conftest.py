@@ -8,7 +8,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-os.environ.setdefault("RELAY_DATABASE_URL", "sqlite:///:memory:")
+if "RELAY_DATABASE_URL" not in os.environ:
+    # A real (temp-file) SQLite DB, not `:memory:` — the shared, global
+    # app.db.session engine (used directly by CLI commands and background
+    # scheduler tick functions under test, not the per-test db_session
+    # fixture below) must be reachable from a different OS thread than the
+    # one that created its schema, since scheduler ticks now run their
+    # blocking work via asyncio.to_thread (core/scheduler.py). SQLAlchemy's
+    # default pool for a `:memory:` URL is SingletonThreadPool, which hands
+    # each thread its own separate, empty in-memory database — a tick
+    # running in a worker thread would see "no such table" for schema
+    # created on the main thread. A real file has no such per-thread
+    # isolation, matching how a real (non-`:memory:`) deployment behaves.
+    _shared_db_fd, _shared_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(_shared_db_fd)
+    os.environ["RELAY_DATABASE_URL"] = f"sqlite:///{_shared_db_path}"
 os.environ.setdefault("RELAY_COOKIE_SECURE", "false")
 # A fixed, obviously-fake key so upstream-account encryption tests don't
 # need a real secret configured. Individual tests that need to exercise

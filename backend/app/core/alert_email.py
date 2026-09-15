@@ -5,6 +5,7 @@ alerts.py's compute_active_alerts() as its only source of truth for
 what's currently wrong, so the bell and the emails can never disagree
 about what's active."""
 
+import asyncio
 import uuid
 
 from sqlalchemy.orm import Session
@@ -99,7 +100,7 @@ def _send(db: Session, sender: Sender, recipients: list[str], subject: str, body
         return False
 
 
-async def alert_email_tick() -> None:
+def _alert_email_tick_sync() -> None:
     db = SessionLocal()
     try:
         settings_row = get_relay_settings(db)
@@ -150,3 +151,10 @@ async def alert_email_tick() -> None:
             db.commit()
     finally:
         db.close()
+
+
+async def alert_email_tick() -> None:
+    # send_alert_email (via _send) is a blocking smtplib call — see
+    # connection_test_tick's identical rationale for why this can't run
+    # directly on the event loop.
+    await asyncio.to_thread(_alert_email_tick_sync)

@@ -3,6 +3,7 @@ periodically re-tests every enabled upstream account, gated on an
 admin-configurable interval (relay_settings.connection_test_interval_minutes,
 None = disabled/manual-only)."""
 
+import asyncio
 import datetime
 
 from sqlalchemy.orm import Session
@@ -58,7 +59,7 @@ def run_connection_test_batch(db: Session) -> int:
     return tested_count
 
 
-async def connection_test_tick() -> None:
+def _connection_test_tick_sync() -> None:
     db = SessionLocal()
     try:
         settings_row = get_relay_settings(db)
@@ -77,3 +78,16 @@ async def connection_test_tick() -> None:
         db.commit()
     finally:
         db.close()
+
+
+async def connection_test_tick() -> None:
+    # run_connection_test_batch does blocking smtplib I/O (up to a 10s
+    # timeout per step) for every enabled upstream account, one at a time
+    # — running that directly on this coroutine would block the single
+    # asyncio event loop that also serves every HTTP request, freezing the
+    # whole app for the batch's full duration whenever an upstream is slow
+    # or unreachable. to_thread moves the entire synchronous body (DB
+    # session included — it's only ever touched from this one thread for
+    # the duration of the call, so there's no cross-thread sharing) off
+    # the event loop.
+    await asyncio.to_thread(_connection_test_tick_sync)

@@ -152,6 +152,49 @@ def test_tick_runs_when_interval_elapsed_and_updates_last_run(monkeypatch: pytes
     db.close()
 
 
+def test_tick_does_not_block_the_event_loop_while_its_batch_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: connection_test_tick used to run its blocking work
+    (real smtplib calls, in run_connection_test_batch) directly on the
+    coroutine — freezing the single asyncio event loop, and therefore
+    every concurrent HTTP request the app was serving, for the whole
+    batch's duration. Moving it to a worker thread (asyncio.to_thread)
+    must let other coroutines keep making progress concurrently."""
+    import asyncio
+    import time
+
+    db = SessionLocal()
+    get_relay_settings(db).connection_test_interval_minutes = 30
+    db.commit()
+    db.close()
+
+    def slow_batch(db: Session) -> int:
+        time.sleep(0.3)
+        return 1
+
+    monkeypatch.setattr("app.core.scheduled_tests.run_connection_test_batch", slow_batch)
+
+    async def scenario() -> int:
+        heartbeats = 0
+
+        async def heartbeat() -> None:
+            nonlocal heartbeats
+            while True:
+                await asyncio.sleep(0.02)
+                heartbeats += 1
+
+        heartbeat_task = asyncio.create_task(heartbeat())
+        await connection_test_tick()
+        heartbeat_task.cancel()
+        return heartbeats
+
+    heartbeats = asyncio.run(scenario())
+    # ~0.3s of blocking work at a 0.02s heartbeat interval allows roughly
+    # 15 heartbeats if the loop stayed responsive throughout; a fraction
+    # of that is still enough to prove it wasn't frozen solid the whole
+    # time, without making the test timing-sensitive/flaky.
+    assert heartbeats >= 5
+
+
 def test_tick_skips_when_interval_has_not_elapsed_yet(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core.clock import utcnow
 
