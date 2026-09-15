@@ -6,6 +6,7 @@ import { AppShell } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
+import { AuditLogRoutes } from "./pages/audit-log";
 import { LocalUsersRoutes } from "./pages/local-users";
 import { MailLogRoutes } from "./pages/mail-log";
 import { Queue } from "./pages/Queue";
@@ -58,6 +59,7 @@ export function App() {
         <Route path="/local-users/*" element={<LocalUsersRoutes />} />
         <Route path="/mail-log/*" element={<MailLogRoutes />} />
         <Route path="/queue" element={<Queue />} />
+        <Route path="/audit-log/*" element={<AuditLogRoutes />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

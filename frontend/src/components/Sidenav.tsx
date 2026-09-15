@@ -12,6 +12,7 @@ const ITEMS: { to: string; label: string; icon: IconName }[] = [
   { to: "/local-users", label: "Local SMTP Users", icon: "users" },
   { to: "/mail-log", label: "Mail Log", icon: "activity" },
   { to: "/queue", label: "Queue", icon: "list" },
+  { to: "/audit-log", label: "Audit Log", icon: "file-text" },
   { to: "/settings", label: "Settings", icon: "settings" },
 ];
 
