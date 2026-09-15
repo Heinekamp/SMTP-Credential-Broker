@@ -22,7 +22,16 @@ class AdminUser(Base):
     )
     last_login_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
 
-    sessions: Mapped[list["AdminSession"]] = relationship(back_populates="admin_user")
+    # passive_deletes=True: admin_sessions.admin_user_id has ondelete="CASCADE"
+    # below, and PRAGMA foreign_keys=ON is set (db/session.py) — without this,
+    # SQLAlchemy's unit-of-work would try to null out admin_user_id itself
+    # before deleting the parent, which fails since the column is
+    # nullable=False, instead of deferring to the DB's own cascade. No delete
+    # route exists for AdminUser yet, but this must be in place before one
+    # does (see the Sender/LocalSmtpUser fix for the identical bug).
+    sessions: Mapped[list["AdminSession"]] = relationship(
+        back_populates="admin_user", passive_deletes=True
+    )
 
 
 class AdminSession(Base):

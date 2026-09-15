@@ -55,13 +55,29 @@ def _sasl_set_user(payload: dict) -> dict:
     return {"ok": True}
 
 
+def _sasl_user_exists(username: str) -> bool:
+    # sasldblistusers2 prints one "user@realm: userPassword" line per entry
+    # — a positive existence check, unlike pattern-matching saslpasswd2's
+    # own (version/locale-dependent) stderr wording. Same sasl2-bin package
+    # as saslpasswd2, so it's always present alongside it.
+    result = _run(["sasldblistusers2"])
+    if result.returncode != 0:
+        # Can't determine — fall through to attempting the delete and
+        # reporting whatever saslpasswd2 itself says, rather than guessing.
+        return True
+    prefix = f"{username}@{SASL_REALM}:"
+    return any(line.startswith(prefix) for line in result.stdout.splitlines())
+
+
 def _sasl_delete_user(payload: dict) -> dict:
     username = payload["username"]
+    # Idempotent delete (matches the app-side revoke/disable semantics):
+    # check existence first with a real command rather than guessing from
+    # saslpasswd2's own stderr wording, which is version/locale-dependent.
+    if not _sasl_user_exists(username):
+        return {"ok": True}
     result = _run(["saslpasswd2", "-d", "-u", SASL_REALM, username])
-    # Exit code 1 with "no user" style stderr means it was already absent —
-    # deleting an absent user is not a failure (idempotent, matches the
-    # app-side revoke/disable semantics).
-    if result.returncode != 0 and "no such" not in result.stderr.lower() and "not found" not in result.stderr.lower():
+    if result.returncode != 0:
         return {"ok": False, "error": f"saslpasswd2 -d failed: {result.stderr.strip()}"}
     return {"ok": True}
 
