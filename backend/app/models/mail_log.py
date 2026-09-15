@@ -11,6 +11,17 @@ from app.models.enums import MailStatus, str_enum
 class MailLog(Base):
     __tablename__ = "mail_log"
     __table_args__ = (
+        # unique: ingestion is idempotent by construction (_get_or_create
+        # looks up by queue_id before inserting) — this turns any future
+        # violation of that invariant (e.g. a second, concurrent ingestion
+        # run racing the same lookup) into a loud IntegrityError instead of
+        # a silently duplicated row. The actual concurrency fix is
+        # ingest_new_log_lines's own process-wide lock
+        # (mail_log_ingest.py); this is the backstop. A plain unique index,
+        # not a UniqueConstraint, since SQLite can't ALTER TABLE ADD
+        # CONSTRAINT without a full table rebuild (Alembic batch mode),
+        # while CREATE UNIQUE INDEX needs neither.
+        Index("ux_mail_log_queue_id", "queue_id", unique=True),
         Index("ix_mail_log_timestamp", "timestamp"),
         Index("ix_mail_log_envelope_sender", "envelope_sender"),
         Index("ix_mail_log_local_smtp_user_id", "local_smtp_user_id"),
@@ -18,7 +29,7 @@ class MailLog(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    queue_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    queue_id: Mapped[str] = mapped_column(String(64), nullable=False)
     timestamp: Mapped[datetime.datetime] = mapped_column(nullable=False)
     # Nullable: a log row must remain storable after the referenced local
     # user or upstream account is later deleted (database-schema.md §7).

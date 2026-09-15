@@ -1,7 +1,9 @@
 import datetime
+import threading
+import time
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.mail_log_ingest import ingest_new_log_lines
 from app.core.postfix_control import MaillogTail
@@ -122,6 +124,57 @@ def test_ingest_with_unknown_sasl_user_and_upstream_leaves_fields_null(
     row = db_session.query(MailLog).filter(MailLog.queue_id == "4XYZ000001").one()
     assert row.local_smtp_user_id is None
     assert row.upstream_account_id is None
+
+
+def test_concurrent_ingestion_runs_are_serialized(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for issue #14: ingest_new_log_lines runs on every
+    GET /api/mail-log request with no coordination between calls (sync
+    FastAPI routes run in a thread pool, so this is real thread
+    concurrency even with a single uvicorn worker). Two overlapping calls
+    used to both read the same stale byte_offset and both process the
+    same new maillog bytes — creating two rows for one logical event, or
+    (now that queue_id has a unique index) crashing outright on the
+    second commit. The module-level lock must fully serialize them:
+    however the two threads get scheduled, their time inside
+    tail_maillog must never overlap."""
+    engine = db_session.get_bind()
+    session_factory = sessionmaker(bind=engine)
+
+    intervals: list[tuple[float, float]] = []
+    intervals_lock = threading.Lock()
+
+    def fake_tail(since_offset: int) -> MaillogTail:
+        start = time.monotonic()
+        time.sleep(0.05)
+        end = time.monotonic()
+        with intervals_lock:
+            intervals.append((start, end))
+        return MaillogTail(lines=[], new_offset=since_offset, truncated=False)
+
+    monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", fake_tail)
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        session = session_factory()
+        try:
+            ingest_new_log_lines(session)
+        except BaseException as exc:  # noqa: BLE001 - captured for the assertion below
+            errors.append(exc)
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not any(t.is_alive() for t in threads), "a worker thread hung — the lock deadlocked"
+    assert errors == []
+    assert len(intervals) == 2
+    (a_start, a_end), (b_start, b_end) = intervals
+    assert a_end <= b_start or b_end <= a_start, f"overlapping ingestion runs: {intervals}"
 
 
 def test_parsed_timestamp_is_used(db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch) -> None:

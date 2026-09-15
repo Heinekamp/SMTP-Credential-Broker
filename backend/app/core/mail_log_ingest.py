@@ -13,6 +13,7 @@ table an admin wants to see update live as a message moves through the
 queue (queued -> sent/deferred/bounced).
 """
 
+import threading
 import uuid
 
 from sqlalchemy.orm import Session
@@ -23,6 +24,18 @@ from app.models.enums import MailStatus
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
 from app.models.upstream import UpstreamAccount
+
+# ingest_new_log_lines runs on every GET /api/mail-log request (this
+# module's own docstring), with no coordination between them — two
+# concurrent requests (two admin tabs, or a poll overlapping a manual
+# refresh; sync FastAPI `def` routes run in a thread pool, so this is real
+# thread concurrency even with a single uvicorn worker, which is this
+# app's deployment model) could both read the same stale byte_offset, both
+# tail the same maillog bytes, and both independently create a row for the
+# same queue_id or reject event — MailLog.queue_id's unique index turns
+# that into a crash instead of a silent duplicate, but the actual fix is
+# making sure it can't happen: only one ingestion run executes at a time.
+_ingest_lock = threading.Lock()
 
 
 def _get_state(db: Session) -> MailLogIngestState:
@@ -60,8 +73,16 @@ def _get_or_create(db: Session, queue_id: str, event: parser.LogEvent) -> MailLo
 
 def ingest_new_log_lines(db: Session) -> int:
     """Pulls and applies any maillog lines written since the last call.
-    Idempotent and safe to call as often as wanted. Returns the number of
-    raw lines processed (not all of which necessarily produced an event)."""
+    Idempotent and safe to call as often as wanted. Serialized by
+    _ingest_lock (see its comment) so two overlapping calls can't both
+    process the same maillog bytes."""
+    with _ingest_lock:
+        return _ingest_new_log_lines_locked(db)
+
+
+def _ingest_new_log_lines_locked(db: Session) -> int:
+    """Returns the number of raw lines processed (not all of which
+    necessarily produced an event)."""
     state = _get_state(db)
     tail = tail_maillog(state.byte_offset)
 
@@ -83,7 +104,7 @@ def ingest_new_log_lines(db: Session) -> int:
                     # NOQUEUE rejections never get a real Postfix queue ID
                     # (the message was refused before being queued at
                     # all) — synthesize one so the column's not-null,
-                    # indexed-but-not-unique contract still holds.
+                    # unique contract still holds.
                     queue_id=f"REJECT-{uuid.uuid4().hex[:12]}",
                     timestamp=event.timestamp,
                     envelope_sender=event.envelope_sender or "",
