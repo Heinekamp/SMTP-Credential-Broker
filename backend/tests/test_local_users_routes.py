@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -86,6 +87,30 @@ def test_regenerate_password_updates_sasldb_and_hash(
     assert fake_postfix_control[-1] == ("set", "inventree", new_password)
 
 
+def test_regenerate_never_touches_sasldb2_before_the_new_hash_is_flushed_to_the_db(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same ordering bug as the re-enable regression test above, in the
+    sibling endpoint that has the identical shape."""
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "InvenTree", "username": "inventree"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+    fake_postfix_control.clear()
+
+    def failing_flush() -> None:
+        raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(db_session, "flush", failing_flush)
+
+    with pytest.raises(RuntimeError):
+        admin_client.post(f"/api/local-users/{user_id}/regenerate-password", headers=csrf_headers(admin_client))
+
+    assert fake_postfix_control == []
+
+
 def test_disable_deletes_sasl_entry(admin_client: TestClient, fake_postfix_control: list) -> None:
     created = admin_client.post(
         "/api/local-users",
@@ -130,6 +155,36 @@ def test_re_enable_issues_a_new_password(
     db_session.expire_all()
     row = db_session.get(LocalSmtpUser, user_id)
     assert verify_password(row.password_hash, new_password) is True
+
+
+def test_re_enable_never_touches_sasldb2_before_the_new_state_is_flushed_to_the_db(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: the new password used to be written to sasldb2
+    *before* the DB transaction was ever touched — a commit failure
+    afterward left a live, working credential whose password was never
+    returned to anyone, while the DB still showed the user disabled with
+    the old hash. Simulating a flush failure proves sasldb2 is never
+    called until the new state has already been staged in the DB
+    transaction (same ordering fix applied to regenerate_password)."""
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "InvenTree", "username": "inventree"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+    admin_client.patch(f"/api/local-users/{user_id}", json={"enabled": False}, headers=csrf_headers(admin_client))
+    fake_postfix_control.clear()
+
+    def failing_flush() -> None:
+        raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(db_session, "flush", failing_flush)
+
+    with pytest.raises(RuntimeError):
+        admin_client.patch(f"/api/local-users/{user_id}", json={"enabled": True}, headers=csrf_headers(admin_client))
+
+    assert fake_postfix_control == []
 
 
 def test_delete_revokes_sasl_before_removing_the_row(admin_client: TestClient, fake_postfix_control: list) -> None:

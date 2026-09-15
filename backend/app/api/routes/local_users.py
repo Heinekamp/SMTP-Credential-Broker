@@ -148,13 +148,26 @@ def update_user(
 
     if "enabled" in data and data["enabled"] != user.enabled:
         if data["enabled"] is False:
+            user.enabled = False
+            db.flush()  # surfaces DB-level errors before the external sasldb2 call
             _delete_sasl_or_503(user.username)
         else:
+            # Order matters: the new password_hash is flushed to the DB
+            # *before* sasldb2 gets the working credential, not after.
+            # Flushing first surfaces most DB-level failures (matches
+            # create_user's identical rationale) while the sasldb2 write
+            # still hasn't happened, so a flush failure can't leave a live
+            # credential the DB doesn't know about. Doing it in the other
+            # order — as this used to — meant a commit failure *after* a
+            # successful sasldb2 write left a fully working credential with
+            # a password that was never returned to anyone, while the DB
+            # still showed the user disabled with the old hash.
             new_password = generate_password()
-            _set_sasl_or_503(user.username, new_password)
             user.password_hash = hash_password(new_password)
             user.password_last_rotated_at = utcnow()
-        user.enabled = data["enabled"]
+            user.enabled = True
+            db.flush()
+            _set_sasl_or_503(user.username, new_password)
 
     if "name" in data and data["name"] is not None:
         user.name = data["name"]
@@ -186,9 +199,14 @@ def regenerate_password(
 ) -> PasswordRevealResponse:
     user = _get_or_404(db, user_id)
     password = generate_password()
-    _set_sasl_or_503(user.username, password)
+    # Same ordering fix as update_user's re-enable path: flush the new
+    # hash to the DB before sasldb2 gets the working credential, not after
+    # — otherwise a commit failure following a successful sasldb2 write
+    # leaves a live credential the DB never recorded.
     user.password_hash = hash_password(password)
     user.password_last_rotated_at = utcnow()
+    db.flush()
+    _set_sasl_or_503(user.username, password)
     record_audit(
         db,
         admin_user_id=admin.id,
