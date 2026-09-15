@@ -1,17 +1,24 @@
 import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class SenderCreate(BaseModel):
-    address: str
+    # EmailStr (not plain str): this address is tab-joined with other
+    # fields into Postfix lookup-map source files (config_generator.py's
+    # sender_login/sender_relayhost/sasl_passwd) — a literal tab or
+    # newline here would inject an extra, attacker-chosen record into the
+    # map Postfix loads. Only admins can set this today, so this is
+    # defense-in-depth against a misconfiguration/typo, not a
+    # cross-privilege exploit.
+    address: EmailStr
     upstream_account_id: int
     enabled: bool = True
     description: str | None = None
 
 
 class SenderUpdate(BaseModel):
-    address: str | None = None
+    address: EmailStr | None = None
     upstream_account_id: int | None = None
     enabled: bool | None = None
     description: str | None = None

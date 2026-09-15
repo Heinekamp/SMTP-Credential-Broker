@@ -28,6 +28,39 @@ def test_requires_authentication(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_create_rejects_a_host_containing_a_tab(admin_client: TestClient) -> None:
+    """Regression test: host is tab-joined into Postfix lookup-map source
+    files (config_generator.py's sasl_passwd/sender_relayhost) — a
+    literal tab would inject an extra, attacker-chosen map record."""
+    response = admin_client.post(
+        "/api/upstream-accounts",
+        json={**PAYLOAD, "host": "smtp.strato.de\tevil.example"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
+def test_create_rejects_a_username_containing_a_colon(admin_client: TestClient) -> None:
+    """Regression test: username is embedded as `username:password` in
+    the generated sasl_passwd map line (config_generator.py) — an extra
+    colon would shift where Postfix splits username from password."""
+    response = admin_client.post(
+        "/api/upstream-accounts",
+        json={**PAYLOAD, "username": "user:extra"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
+def test_create_rejects_a_username_containing_whitespace(admin_client: TestClient) -> None:
+    response = admin_client.post(
+        "/api/upstream-accounts",
+        json={**PAYLOAD, "username": "user name"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
 def test_create_never_returns_password(admin_client: TestClient) -> None:
     account = _create(admin_client)
     assert "password" not in account

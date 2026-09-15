@@ -53,6 +53,34 @@ def test_create_returns_password_once_and_hashes_it_in_the_db(
     assert fake_postfix_control == [("set", "inventree", password)]
 
 
+def test_create_rejects_a_username_with_a_leading_hyphen(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    """Regression test: username is passed as saslpasswd2's trailing argv
+    element (postfix/control_surface.py) — a leading '-' could be read as
+    a flag by its own argument parsing rather than as a userid."""
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Evil", "username": "-f"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+    assert fake_postfix_control == []
+
+
+def test_create_rejects_a_username_containing_a_tab(admin_client: TestClient, fake_postfix_control: list) -> None:
+    """Regression test: username is comma-joined into Postfix's
+    sender_login lookup-map source file (permissions.py's
+    sender_login_map) — a literal tab here would inject an extra record."""
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Evil", "username": "inventree\tinjected"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+    assert fake_postfix_control == []
+
+
 def test_duplicate_username_is_rejected(admin_client: TestClient, fake_postfix_control: list) -> None:
     payload = {"name": "InvenTree", "username": "inventree"}
     assert admin_client.post("/api/local-users", json=payload, headers=csrf_headers(admin_client)).status_code == 201

@@ -35,6 +35,19 @@ def test_create_requires_a_real_upstream_account(admin_client: TestClient) -> No
     assert response.status_code == 422
 
 
+def test_create_rejects_an_address_containing_a_tab(admin_client: TestClient) -> None:
+    """Regression test: address is tab-joined into Postfix lookup-map
+    source files (config_generator.py) — a literal tab here would inject
+    an extra, attacker-chosen record into the map Postfix loads."""
+    account_id = _create_upstream(admin_client)
+    response = admin_client.post(
+        "/api/senders",
+        json={"address": "noreply@example.com\tinjected@evil.example", "upstream_account_id": account_id},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
 def test_create_and_list(admin_client: TestClient) -> None:
     account_id = _create_upstream(admin_client)
     response = admin_client.post(

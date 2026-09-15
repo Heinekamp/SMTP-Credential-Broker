@@ -4,13 +4,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TestResult, TlsMode
 
+# Hostname (RFC 1123 labels) or IPv4 literal — both config_generator.py's
+# sasl_passwd/sender_relayhost map lines and control_surface.py's actual
+# SMTP connection only make sense with one of these. Also, incidentally,
+# rules out the literal tab/newline that would otherwise let a crafted
+# host inject an extra record into those tab-separated map files.
+_HOST_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+# The upstream account's own login name — often an email address, but
+# providers vary, so this only excludes what would actually break the
+# generated `username:password` sasl_passwd line or inject an extra
+# tab-separated map record: whitespace (space/tab/newline/CR) and ':'.
+_UPSTREAM_USERNAME_PATTERN = r"^[^\s:]{1,320}$"
+
 
 class UpstreamAccountCreate(BaseModel):
     name: str
-    host: str
+    host: str = Field(pattern=_HOST_PATTERN)
     port: int = Field(gt=0, le=65535)
     tls_mode: TlsMode = TlsMode.starttls
-    username: str
+    username: str = Field(pattern=_UPSTREAM_USERNAME_PATTERN)
     password: str = Field(min_length=1)
 
 
@@ -22,10 +34,10 @@ class UpstreamAccountUpdate(BaseModel):
     without retyping it must not clear it)."""
 
     name: str | None = None
-    host: str | None = None
+    host: str | None = Field(default=None, pattern=_HOST_PATTERN)
     port: int | None = Field(default=None, gt=0, le=65535)
     tls_mode: TlsMode | None = None
-    username: str | None = None
+    username: str | None = Field(default=None, pattern=_UPSTREAM_USERNAME_PATTERN)
     password: str | None = None
     enabled: bool | None = None
 

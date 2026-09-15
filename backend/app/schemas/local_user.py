@@ -1,11 +1,21 @@
 import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LocalUserCreate(BaseModel):
     name: str
-    username: str
+    # Restrictive allowlist (not plain str): this username is comma-joined
+    # into Postfix's sender_login lookup-map source file
+    # (config_generator.py/permissions.py's sender_login_map) alongside a
+    # tab-separated sender address, and is also passed as saslpasswd2's
+    # trailing argv element (postfix/control_surface.py). A literal tab or
+    # newline would inject an extra map record; a leading '-' could be
+    # read as a flag by saslpasswd2's own argument parsing, so the pattern
+    # requires the first character be alphanumeric. Only admins can set
+    # this today, so this is defense-in-depth, not a cross-privilege
+    # exploit.
+    username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class LocalUserUpdate(BaseModel):
