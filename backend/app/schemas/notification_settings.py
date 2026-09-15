@@ -26,3 +26,8 @@ class NotificationSettingsUpdate(BaseModel):
     notify_on_upstream_test_failure: bool | None = None
     notify_on_app_update_available: bool | None = None
     notify_on_postfix_update_available: bool | None = None
+
+
+class TestAlertResponse(BaseModel):
+    success: bool
+    detail: str

@@ -24,3 +24,16 @@ export function updateNotificationSettings(update: NotificationSettingsUpdate): 
     body: JSON.stringify(update),
   });
 }
+
+export interface TestAlertResult {
+  success: boolean;
+  detail: string;
+}
+
+/** Sends one real alert email right now using whatever is currently
+ * saved — the caller should Save first if there are unsaved changes,
+ * since this always uses the persisted settings, not the form's local
+ * state. */
+export function sendTestAlert(): Promise<TestAlertResult> {
+  return apiFetch<TestAlertResult>("/api/notification-settings/test", { method: "POST" });
+}

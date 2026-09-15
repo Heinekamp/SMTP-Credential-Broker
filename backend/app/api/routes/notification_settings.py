@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.core.alert_email import resolve_notification_sender, send_test_alert
 from app.core.audit import client_ip, record_audit
 from app.core.settings_store import get_relay_settings
 from app.models.admin import AdminUser
-from app.schemas.notification_settings import NotificationSettingsRead, NotificationSettingsUpdate
+from app.schemas.notification_settings import NotificationSettingsRead, NotificationSettingsUpdate, TestAlertResponse
 
 router = APIRouter(
     prefix="/notification-settings", tags=["notification-settings"], dependencies=[Depends(get_current_admin)]
@@ -59,3 +60,43 @@ def update_notification_settings(
     db.commit()
     db.refresh(settings_row)
     return _to_read(settings_row)
+
+
+@router.post("/test", response_model=TestAlertResponse, dependencies=[Depends(require_csrf)])
+def send_test_notification(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> TestAlertResponse:
+    """Sends one real alert email right now, using whatever
+    recipients/sender/from-name are currently configured — proves the
+    pipeline actually works without waiting for a real degraded/failure
+    condition to trigger it. A precondition that makes sending flatly
+    impossible (no recipients, no usable sender) is a 400; an actual send
+    failure (bad credentials, unreachable upstream) is reported as
+    success: false with the real error, the same "diagnostic report, not
+    an exception" contract the Test Connection button already uses."""
+    settings_row = get_relay_settings(db)
+    if not settings_row.notify_recipients:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure at least one recipient first.")
+    sender = resolve_notification_sender(db, settings_row.notify_sender_id)
+    if sender is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Select a sender with a working upstream account first.")
+
+    success, detail = send_test_alert(
+        db,
+        sender=sender,
+        recipients=list(settings_row.notify_recipients),
+        from_name=settings_row.notify_from_name,
+    )
+    record_audit(
+        db,
+        admin_user_id=admin.id,
+        action="notification_settings.test_alert",
+        target_type="relay_settings",
+        target_id=settings_row.id,
+        detail={"success": success},
+        ip_address=client_ip(request),
+    )
+    db.commit()
+    return TestAlertResponse(success=success, detail=detail)

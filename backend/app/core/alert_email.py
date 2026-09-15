@@ -43,7 +43,10 @@ _VERSION_TRACKED_KINDS = (
 )
 
 
-def _resolve_sender(db: Session, sender_id: int | None) -> Sender | None:
+def resolve_notification_sender(db: Session, sender_id: int | None) -> Sender | None:
+    """Shared by the scheduled tick and the Settings UI's "Send Test
+    Alert" button — the same "is this sender actually usable to send
+    alert mail from" check either way."""
     if sender_id is None:
         return None
     sender = db.get(Sender, sender_id)
@@ -76,7 +79,12 @@ def _log_mail(
     db.commit()
 
 
-def _send(db: Session, sender: Sender, recipients: list[str], subject: str, body: str, from_name: str | None) -> bool:
+def _send(
+    db: Session, sender: Sender, recipients: list[str], subject: str, body: str, from_name: str | None
+) -> tuple[bool, str]:
+    """Returns (success, detail) — detail is only meant for the caller to
+    surface to a human (the test-alert route does; the scheduled tick
+    ignores it and just logs), never parsed."""
     try:
         send_alert_email(
             sender=sender,
@@ -87,7 +95,7 @@ def _send(db: Session, sender: Sender, recipients: list[str], subject: str, body
             from_name=from_name,
         )
         _log_mail(db, sender=sender, recipients=recipients, status=MailStatus.sent, error=None)
-        return True
+        return True, "Sent."
     except Exception as exc:
         # A transient send failure shouldn't suppress the alert forever —
         # the caller leaves "already notified" state unchanged so this
@@ -97,7 +105,21 @@ def _send(db: Session, sender: Sender, recipients: list[str], subject: str, body
         # enum's values were designed with this non-Postfix path in mind).
         _logger.warning("alert email send failed", exc_info=True)
         _log_mail(db, sender=sender, recipients=recipients, status=MailStatus.deferred, error=str(exc))
-        return False
+        return False, str(exc)
+
+
+def send_test_alert(db: Session, *, sender: Sender, recipients: list[str], from_name: str | None) -> tuple[bool, str]:
+    """Manual, on-demand send behind the Settings UI's "Send Test Alert"
+    button — proves the pipeline (upstream credentials, recipients, from
+    name) actually works without waiting for a real degraded/failure
+    condition. Reuses _send's exact same call path, so a test send shows
+    up in the Mail Log the same way a real alert would."""
+    subject = "[SMTP Manager] Test alert"
+    body = (
+        "This is a test alert from your Managed SMTP Relay.\n\n"
+        "If you received this, alert email is configured correctly."
+    )
+    return _send(db, sender, recipients, subject, body, from_name)
 
 
 def _alert_email_tick_sync() -> None:
@@ -106,7 +128,7 @@ def _alert_email_tick_sync() -> None:
         settings_row = get_relay_settings(db)
         if not settings_row.notify_recipients:
             return
-        sender = _resolve_sender(db, settings_row.notify_sender_id)
+        sender = resolve_notification_sender(db, settings_row.notify_sender_id)
         if sender is None:
             return
 
@@ -126,7 +148,8 @@ def _alert_email_tick_sync() -> None:
                 matching = next((a for a in alerts if a.kind == kind), None)
                 subject = f"[SMTP Manager] {matching.title if matching else kind}"
                 body = matching.detail if matching else ""
-                if _send(db, sender, recipients, subject, body, from_name):
+                sent, _detail = _send(db, sender, recipients, subject, body, from_name)
+                if sent:
                     setattr(state, active_attr, True)
                     changed = True
             elif not now_active and was_active:
@@ -143,7 +166,8 @@ def _alert_email_tick_sync() -> None:
                 continue
             matching = next(a for a in alerts if a.kind == kind)
             subject = f"[SMTP Manager] {matching.title}"
-            if _send(db, sender, recipients, subject, matching.detail, from_name):
+            sent, _detail = _send(db, sender, recipients, subject, matching.detail, from_name)
+            if sent:
                 setattr(state, last_emailed_attr, latest_version)
                 changed = True
 

@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Select, Switch, TextInput } from "../../design-system/components";
+import { ApiError } from "../../lib/apiClient";
 import {
   fetchNotificationSettings,
+  sendTestAlert,
   updateNotificationSettings,
   type NotificationSettingsUpdate,
+  type TestAlertResult,
 } from "../../lib/api/notificationSettings";
 import { listSenders } from "../../lib/api/senders";
 
@@ -63,11 +66,23 @@ export function NotificationsTab() {
     setNotifyPostfixUpdate(settings.notify_on_postfix_update_available);
   }, [settings]);
 
+  const [testResult, setTestResult] = useState<TestAlertResult | null>(null);
+
   const save = useMutation({
     mutationFn: (update: NotificationSettingsUpdate) => updateNotificationSettings(update),
     onSuccess: (data) => {
       queryClient.setQueryData(["notification-settings"], data);
       setSaved(true);
+    },
+  });
+
+  const testAlert = useMutation({
+    mutationFn: () => sendTestAlert(),
+    onSuccess: (result) => setTestResult(result),
+    onError: (err) => {
+      const detail =
+        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not reach the server.";
+      setTestResult({ success: false, detail });
     },
   });
 
@@ -170,6 +185,36 @@ export function NotificationsTab() {
             <span style={{ fontSize: "var(--text-sm)" }}>Postfix update available</span>
             <Switch checked={notifyPostfixUpdate} onChange={setNotifyPostfixUpdate} />
           </div>
+        </div>
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
+          <Button
+            variant="default"
+            onClick={() => {
+              setTestResult(null);
+              testAlert.mutate();
+            }}
+            disabled={testAlert.isPending}
+          >
+            {testAlert.isPending ? "Sending…" : "Send Test Alert"}
+          </Button>
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
+            Sends immediately using the currently saved recipients/sender/from name above — save first if you
+            just changed them.
+          </p>
+          {testResult && !testAlert.isPending && (
+            <p
+              role="alert"
+              style={{
+                marginTop: 8,
+                marginBottom: 0,
+                fontSize: "var(--text-sm)",
+                color: testResult.success ? "var(--text-body)" : "var(--status-fault)",
+              }}
+            >
+              {testResult.success ? "Test alert sent — check the configured recipients." : testResult.detail}
+            </p>
+          )}
         </div>
       </Card>
 
