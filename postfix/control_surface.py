@@ -29,6 +29,7 @@ POSTFIX_CONFIG_DIR = "/etc/postfix"
 RELAY_MAP_DIR = "/etc/postfix/relay"
 MAP_TYPE = "lmdb"
 MAILLOG_PATH = "/var/log/postfix/maillog"
+TLS_DIR = "/etc/postfix/tls"
 
 
 def _run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -220,6 +221,101 @@ def _apply_config(payload: dict) -> dict:
     return {"ok": True, "success": True, "validation_detail": detail, "reloaded": reloaded}
 
 
+def _read_tls_files() -> dict[str, str | None]:
+    previous: dict[str, str | None] = {}
+    for filename in ("relay.crt", "relay.key"):
+        try:
+            with open(os.path.join(TLS_DIR, filename), encoding="utf-8") as f:
+                previous[filename] = f.read()
+        except OSError:
+            previous[filename] = None
+    return previous
+
+
+def _write_tls_files(cert_pem: str, key_pem: str) -> None:
+    for filename, content, mode in (("relay.crt", cert_pem, 0o644), ("relay.key", key_pem, 0o600)):
+        live_path = os.path.join(TLS_DIR, filename)
+        tmp_path = live_path + ".new"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, live_path)
+
+
+def _restore_tls_files(previous: dict[str, str | None]) -> None:
+    for filename, content in previous.items():
+        if content is None:  # didn't exist before install — nothing to restore
+            continue
+        live_path = os.path.join(TLS_DIR, filename)
+        tmp_path = live_path + ".new"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, live_path)
+
+
+def _install_tls_certificate(payload: dict) -> dict:
+    """Installs a new TLS cert/key pair for smtpd (postfix-architecture.md
+    §2), replacing the Dockerfile-baked self-signed placeholder or a
+    previously-issued Let's Encrypt certificate. This script is
+    stdlib-only by design (see module docstring) so validation shells out
+    to `openssl` — already a runtime dependency of this image
+    (Dockerfile) — rather than using `cryptography`.
+
+    A bad ACME response or a mismatched pair must never be allowed to
+    take down Postfix's live TLS: nothing on disk is touched unless both
+    checks below pass, and a failed `postfix start` after a valid install
+    restores the previous cert/key, same invariant as _apply_config."""
+    cert_pem = payload["cert_pem"]
+    key_pem = payload["key_pem"]
+
+    with tempfile.TemporaryDirectory() as staging_dir:
+        cert_tmp = os.path.join(staging_dir, "cert.pem")
+        key_tmp = os.path.join(staging_dir, "key.pem")
+        with open(cert_tmp, "w", encoding="utf-8") as f:
+            f.write(cert_pem)
+        with open(key_tmp, "w", encoding="utf-8") as f:
+            f.write(key_pem)
+
+        # "checkend 0" = "would this already be expired if checked right now".
+        checkend = _run(["openssl", "x509", "-in", cert_tmp, "-noout", "-checkend", "0"])
+        if checkend.returncode != 0:
+            return {"ok": True, "success": False, "detail": "Certificate is already expired."}
+
+        # Compare the public key each side implies — works uniformly
+        # regardless of key algorithm, unlike comparing RSA-specific
+        # "modulus" output.
+        cert_pubkey = _run(["openssl", "x509", "-noout", "-pubkey", "-in", cert_tmp])
+        key_pubkey = _run(["openssl", "pkey", "-pubout", "-in", key_tmp])
+        if cert_pubkey.returncode != 0 or key_pubkey.returncode != 0 or cert_pubkey.stdout != key_pubkey.stdout:
+            return {"ok": True, "success": False, "detail": "Private key does not match certificate."}
+
+        previous = _read_tls_files()
+        if previous.get("relay.crt") == cert_pem and previous.get("relay.key") == key_pem:
+            # Idempotent re-install (e.g. the app's startup sync hook
+            # running against files that already match) must not bounce
+            # Postfix's TLS on every app restart.
+            return {"ok": True, "success": True, "detail": "Already installed — no change.", "restarted": False}
+
+        _write_tls_files(cert_pem, key_pem)
+
+        _run(["postfix", "stop"])  # best-effort; "not running" here is fine
+        start_result = _run(["postfix", "start"])
+        if start_result.returncode != 0:
+            combined = f"{start_result.stdout}\n{start_result.stderr}".strip()
+            rollback_detail = ""
+            if any(value is not None for value in previous.values()):
+                _restore_tls_files(previous)
+                rollback_start = _run(["postfix", "start"])
+                rollback_detail = (
+                    "; rolled back to the previous certificate and restarted successfully"
+                    if rollback_start.returncode == 0
+                    else f"; rollback ALSO failed to start: {rollback_start.stderr.strip()}"
+                )
+            return {"ok": True, "success": False, "detail": f"postfix start failed: {combined}{rollback_detail}"}
+
+        return {"ok": True, "success": True, "detail": "Installed.", "restarted": True}
+
+
 def _tail_maillog(payload: dict) -> dict:
     """Returns any maillog bytes written since `since_offset` (Stage 5's
     mail_log ingestion — see backend/app/core/mail_log_ingest.py), plus the
@@ -308,6 +404,7 @@ _HANDLERS = {
     "sasl_set_user": _sasl_set_user,
     "sasl_delete_user": _sasl_delete_user,
     "apply_config": _apply_config,
+    "install_tls_certificate": _install_tls_certificate,
     "status": _status,
     "version": _version,
     "tail_maillog": _tail_maillog,

@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.core.postfix_control import (
     PostfixControlError,
     apply_config,
+    install_tls_certificate,
     queue_delete,
     queue_list,
     queue_requeue,
@@ -187,6 +188,25 @@ def test_other_ops_still_use_the_short_default_timeout(monkeypatch: pytest.Monke
     control_socket(slow_responder)
     with pytest.raises(PostfixControlError):
         sasl_set_user("x", "y")
+
+
+def test_install_tls_certificate_success(control_socket) -> None:
+    received = []
+    response = {"ok": True, "success": True, "detail": "Installed.", "restarted": True}
+    control_socket(lambda req: (received.append(req), response)[1])
+    result = install_tls_certificate(cert_pem="CERT", key_pem="KEY")
+    assert received == [{"op": "install_tls_certificate", "cert_pem": "CERT", "key_pem": "KEY"}]
+    assert result.success is True
+    assert result.restarted is True
+    assert result.detail == "Installed."
+
+
+def test_install_tls_certificate_reports_business_failure_without_raising(control_socket) -> None:
+    control_socket(lambda req: {"ok": True, "success": False, "detail": "Private key does not match certificate."})
+    result = install_tls_certificate(cert_pem="CERT", key_pem="KEY")
+    assert result.success is False
+    assert "does not match" in result.detail
+    assert result.restarted is False
 
 
 def test_status_running(control_socket) -> None:

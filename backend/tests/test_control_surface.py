@@ -11,6 +11,7 @@ without needing saslpasswd2/sasldblistusers2 installed.
 import importlib.util
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -272,6 +273,156 @@ def test_apply_config_reports_when_the_rollback_start_also_fails(
 
     assert result["success"] is False
     assert "rollback to the previous config ALSO failed to start" in result["validation_detail"]
+
+
+def _fixed_tls_payload(cert: str = "new cert", key: str = "new key") -> dict:
+    return {"cert_pem": cert, "key_pem": key}
+
+
+def _openssl_ok_fake_run(
+    *, matching: bool = True, stop_ok: bool = True, start_returncodes: list[int] | None = None
+) -> tuple[Callable, dict]:
+    """Builds a fake `_run` that passes openssl validation (cert not
+    expired, key matches cert unless `matching=False`) and records every
+    call, so tests can assert on ordering/count without duplicating this
+    boilerplate for every scenario."""
+    calls: list[list[str]] = []
+    starts = {"count": 0}
+    start_returncodes = start_returncodes if start_returncodes is not None else [0]
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        calls.append(args)
+        if args[:2] == ["openssl", "x509"] and "-checkend" in args:
+            return _completed(0)
+        if args[:2] == ["openssl", "x509"] and "-pubkey" in args:
+            return _completed(0, stdout="PUBKEY-A\n")
+        if args[:2] == ["openssl", "pkey"]:
+            return _completed(0, stdout="PUBKEY-A\n" if matching else "PUBKEY-B\n")
+        if args == ["postfix", "stop"]:
+            return _completed(0 if stop_ok else 1)
+        if args == ["postfix", "start"]:
+            idx = min(starts["count"], len(start_returncodes) - 1)
+            rc = start_returncodes[idx]
+            starts["count"] += 1
+            return _completed(rc, stderr="" if rc == 0 else "fatal: bad tls config")
+        raise AssertionError(f"unexpected call: {args}")
+
+    return fake_run, calls
+
+
+def test_install_tls_certificate_success_installs_and_restarts(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, calls = _openssl_ok_fake_run()
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result == {"ok": True, "success": True, "detail": "Installed.", "restarted": True}
+    assert (tls_dir / "relay.crt").read_text(encoding="utf-8") == "new cert"
+    assert (tls_dir / "relay.key").read_text(encoding="utf-8") == "new key"
+    assert calls[-2:] == [["postfix", "stop"], ["postfix", "start"]]
+
+
+def test_install_tls_certificate_rejects_expired_certificate(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if "-checkend" in args:
+            return _completed(1)  # already expired
+        raise AssertionError(f"unexpected call: {args}")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result == {"ok": True, "success": False, "detail": "Certificate is already expired."}
+    assert not (tls_dir / "relay.crt").exists()
+
+
+def test_install_tls_certificate_rejects_mismatched_key(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, _ = _openssl_ok_fake_run(matching=False)
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result == {"ok": True, "success": False, "detail": "Private key does not match certificate."}
+    assert not (tls_dir / "relay.crt").exists()
+
+
+def test_install_tls_certificate_is_a_noop_when_already_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "relay.crt").write_text("new cert", encoding="utf-8")
+    (tls_dir / "relay.key").write_text("new key", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, calls = _openssl_ok_fake_run()
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result == {"ok": True, "success": True, "detail": "Already installed — no change.", "restarted": False}
+    assert not any(c[0] == "postfix" for c in calls), "must not bounce postfix when nothing actually changed"
+
+
+def test_install_tls_certificate_rolls_back_when_postfix_start_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "relay.crt").write_text("old cert", encoding="utf-8")
+    (tls_dir / "relay.key").write_text("old key", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, calls = _openssl_ok_fake_run(start_returncodes=[1, 0])
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result["success"] is False
+    assert "rolled back to the previous certificate and restarted successfully" in result["detail"]
+    assert (tls_dir / "relay.crt").read_text(encoding="utf-8") == "old cert"
+    assert (tls_dir / "relay.key").read_text(encoding="utf-8") == "old key"
+    assert len([c for c in calls if c == ["postfix", "start"]]) == 2
+
+
+def test_install_tls_certificate_reports_when_rollback_start_also_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "relay.crt").write_text("old cert", encoding="utf-8")
+    (tls_dir / "relay.key").write_text("old key", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, _ = _openssl_ok_fake_run(start_returncodes=[1, 1])
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result["success"] is False
+    assert "rollback ALSO failed to start" in result["detail"]
+
+
+def test_install_tls_certificate_on_first_boot_has_nothing_to_roll_back_to(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()  # empty — no placeholder cert ever installed
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tls_dir))
+    fake_run, _ = _openssl_ok_fake_run(start_returncodes=[1])
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._install_tls_certificate(_fixed_tls_payload())
+
+    assert result["success"] is False
+    assert "rolled back" not in result["detail"]
 
 
 def test_apply_config_on_first_boot_has_nothing_to_roll_back_to(

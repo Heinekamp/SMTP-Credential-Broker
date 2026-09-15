@@ -110,6 +110,36 @@ def apply_config(
 
 
 @dataclasses.dataclass
+class InstallTlsCertificateResult:
+    success: bool
+    detail: str
+    restarted: bool = False
+
+
+def install_tls_certificate(*, cert_pem: str, key_pem: str) -> InstallTlsCertificateResult:
+    """Installs a new cert/key pair for smtpd via the control surface
+    (postfix-architecture.md §2) — used by the Let's Encrypt issuance/
+    renewal flow (core/acme_tls.py) to replace the self-signed
+    placeholder or a previously-issued certificate. `success: False` is
+    an expected outcome (e.g. a mismatched key, an already-expired
+    cert, or a failed postfix restart) reported here, not raised as
+    PostfixControlError — the RPC itself succeeded.
+
+    Uses the longer apply timeout, same as apply_config: this can also
+    need a full postfix stop+start."""
+    response = _call(
+        "install_tls_certificate",
+        {"cert_pem": cert_pem, "key_pem": key_pem},
+        timeout=get_settings().postfix_control_apply_timeout,
+    )
+    return InstallTlsCertificateResult(
+        success=response.get("success", False),
+        detail=response.get("detail", ""),
+        restarted=response.get("restarted", False),
+    )
+
+
+@dataclasses.dataclass
 class PostfixStatus:
     running: bool
     detail: str
