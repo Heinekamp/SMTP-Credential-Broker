@@ -25,13 +25,16 @@ from app.api.routes import (
     upstream_accounts,
 )
 from app.config import get_settings
+from app.core.acme_tls import sync_certificate_to_postfix
 from app.core.alert_email import alert_email_tick
+from app.core.cert_renewal import cert_renewal_tick
 from app.core.logging_config import configure_logging
 from app.core.request_context import set_request_id
 from app.core.retention import retention_cleanup_tick
 from app.core.scheduled_tests import connection_test_tick
 from app.core.scheduler import run_periodic
 from app.core.update_check import update_check_tick
+from app.db.session import SessionLocal
 
 configure_logging()
 
@@ -46,11 +49,28 @@ _POLL_SECONDS = 60
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     tasks: list[asyncio.Task] = []
     if get_settings().scheduler_enabled:
+        # Self-heals the postfix_tls volume from the database (a lost
+        # volume or a fresh postfix container otherwise silently falls
+        # back to the Dockerfile-baked placeholder) — it's a no-op until
+        # an admin has actually issued a real certificate, and safe even
+        # against a not-yet-ready postfix container
+        # (sync_certificate_to_postfix swallows that itself). Gated on
+        # scheduler_enabled, like every other real-engine touch at
+        # startup, so a TestClient's lifespan never hits the shared
+        # engine before its schema exists (tests use a per-test engine
+        # via get_db's dependency override instead).
+        db = SessionLocal()
+        try:
+            sync_certificate_to_postfix(db)
+        finally:
+            db.close()
+
         tasks = [
             asyncio.create_task(run_periodic("connection_test", _POLL_SECONDS, connection_test_tick)),
             asyncio.create_task(run_periodic("update_check", _POLL_SECONDS, update_check_tick)),
             asyncio.create_task(run_periodic("alert_email", _POLL_SECONDS, alert_email_tick)),
             asyncio.create_task(run_periodic("retention_cleanup", _POLL_SECONDS, retention_cleanup_tick)),
+            asyncio.create_task(run_periodic("cert_renewal", _POLL_SECONDS, cert_renewal_tick)),
         ]
     yield
     for task in tasks:
