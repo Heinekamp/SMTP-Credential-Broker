@@ -2,13 +2,14 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button, Card, StatTile, StatusBadge } from "../design-system/components";
-import { parseApiDate } from "../lib/apiDate";
+import { compactTimestamp, parseApiDate } from "../lib/apiDate";
 import { fetchHealth } from "../lib/api/health";
-import { listMailLog } from "../lib/api/mailLog";
+import { listMailLog, type MailLogEntry } from "../lib/api/mailLog";
 import { listQueue } from "../lib/api/queue";
 import { listSenders } from "../lib/api/senders";
 import { listLocalUsers } from "../lib/api/localUsers";
 import { listUpstreamAccounts, type UpstreamAccount } from "../lib/api/upstreamAccounts";
+import { MAIL_STATUS_BADGE } from "./mail-log/statusMapping";
 
 const FAILURE_STATUSES = new Set(["deferred", "bounced", "rejected"]);
 
@@ -70,7 +71,6 @@ export function Dashboard() {
   const relayStatus = relayStatusMessage(health, accounts);
   const failures = (recentMail?.entries ?? []).filter((e) => FAILURE_STATUSES.has(e.status)).slice(0, 5);
   const successes = (recentMail?.entries ?? []).filter((e) => e.status === "sent").slice(0, 5);
-  const accountById = new Map((accounts ?? []).map((a) => [a.id, a]));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1200 }}>
@@ -123,8 +123,7 @@ export function Dashboard() {
                 onClick={() => navigate(`/mail-log?status=${entry.status}`)}
                 style={rowButtonStyle}
               >
-                <span>{entry.envelope_sender}</span>
-                <StatusBadge status="fault" label={entry.status} size="sm" />
+                <MailRow entry={entry} />
               </button>
             ))}
           </div>
@@ -136,11 +135,8 @@ export function Dashboard() {
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {successes.map((entry) => (
-              <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-sm)" }}>
-                <span>{entry.envelope_sender}</span>
-                <span style={{ color: "var(--text-muted)" }}>
-                  {accountById.get(entry.upstream_account_id ?? -1)?.name ?? "—"}
-                </span>
+              <div key={entry.id} style={rowButtonStyle}>
+                <MailRow entry={entry} />
               </div>
             ))}
           </div>
@@ -178,6 +174,8 @@ const rowButtonStyle = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
+  gap: 8,
+  width: "100%",
   background: "none",
   border: "none",
   padding: 0,
@@ -187,3 +185,27 @@ const rowButtonStyle = {
   fontSize: "var(--text-sm)",
   textAlign: "left" as const,
 };
+
+// Shared by both Recent Delivery Failures and Recent Deliveries — design
+// handoff screen 4: sender -> recipient (truncated, never wrapped, so a
+// long address can't push the status badge off the card), the send time
+// beneath it, and the status badge each mail_log status already has a
+// fixed color/label mapping for (statusMapping.ts).
+function MailRow({ entry }: { entry: MailLogEntry }) {
+  const badge = MAIL_STATUS_BADGE[entry.status];
+  return (
+    <>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {entry.envelope_sender} &rarr; {entry.recipients.join(", ") || "—"}
+        </div>
+        <div style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)" }}>
+          {compactTimestamp(parseApiDate(entry.timestamp))}
+        </div>
+      </div>
+      <span style={{ flexShrink: 0 }}>
+        <StatusBadge status={badge.status} label={badge.label} size="sm" />
+      </span>
+    </>
+  );
+}

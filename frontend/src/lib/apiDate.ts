@@ -8,3 +8,11 @@ export function parseApiDate(iso: string): Date {
   const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
   return new Date(hasTimezone ? iso : `${iso}Z`);
 }
+
+/** "MM-DD HH:mm:ss" in the viewer's local time — the Dashboard's compact
+ * recent-activity rows (design handoff screen 4) have no room for a full
+ * locale-formatted timestamp or a year, unlike Mail Log's own detail rows. */
+export function compactTimestamp(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
