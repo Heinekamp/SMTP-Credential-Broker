@@ -73,6 +73,23 @@ Postfix's `myhostname`, EHLO greeting, or SASL realm. You do not need (and
 generally should not) set them to the same value unless that's also
 genuinely the hostname clients connect to.
 
+> [!IMPORTANT]
+> A client validates the certificate against whatever hostname it
+> connects *to* — never the relay's IP address, and never anything Postfix
+> itself claims to be. If this relay only lives on your LAN, that domain
+> needs a **local** DNS answer pointing it at the relay's LAN IP address —
+> a "Local DNS Record" (the exact name varies by vendor) in your router or
+> DNS server. The public Cloudflare zone used for the DNS-01 challenge
+> above doesn't need, and normally shouldn't have, an A record for this
+> domain at all — it exists purely to prove domain ownership to Let's
+> Encrypt, not to make the relay reachable from the internet.
+>
+> Skip this and every client that connects using the relay's bare IP
+> address (rather than the domain) will fail with a certificate/hostname
+> mismatch and refuse to send — even though the certificate itself is
+> perfectly valid. Point the client at the domain, and make sure that
+> domain actually resolves to the relay for whichever network it's on.
+
 Once issued, the certificate and its private key are stored encrypted in
 the database — the source of truth an app-startup check and the daily
 renewal check reconcile the Postfix container's live files against, so a
