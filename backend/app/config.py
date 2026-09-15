@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     # sasldb2 or install generated Postfix config. Never a network socket.
     postfix_control_socket: str = "/shared-config/control.sock"
     postfix_control_timeout: float = 15.0
+    # apply_config's own worst case is stop-then-start, each up to
+    # control_surface.py's own 30s subprocess timeout — up to ~60s total
+    # for a slow-but-successful reload. postfix_control_timeout alone used
+    # to also gate this call and would time out first, misreporting a
+    # successful-but-slow reload as "control surface unreachable" (no
+    # ConfigGeneration row recorded, checksum bookkeeping left out of sync
+    # with Postfix's real state). Comfortably above that 60s worst case.
+    postfix_control_apply_timeout: float = 75.0
 
     # What local SMTP users are told to configure their services with
     # (the "Connection Details" view, claude-design-prompt.md's Local SMTP

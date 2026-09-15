@@ -1,6 +1,7 @@
 import json
 import socket
 import threading
+import time
 from collections.abc import Callable, Generator
 
 import pytest
@@ -146,6 +147,46 @@ def test_apply_config_reports_validation_failure_without_raising(control_socket)
     assert result.success is False
     assert result.reloaded is False
     assert "bogus_directive" in result.validation_detail
+
+
+def test_apply_config_uses_its_own_longer_timeout(
+    monkeypatch: pytest.MonkeyPatch, control_socket
+) -> None:
+    """Regression test: apply_config used to share postfix_control_timeout
+    (15s default) with every other op, even though a real reload can take
+    up to ~60s (stop-then-start, each up to control_surface.py's own 30s
+    subprocess timeout) — timing out a slow-but-successful reload and
+    misreporting it as "control surface unreachable". A response slower
+    than the short default timeout but within the longer apply-specific
+    one must still succeed."""
+    monkeypatch.setenv("RELAY_POSTFIX_CONTROL_TIMEOUT", "0.2")
+    monkeypatch.setenv("RELAY_POSTFIX_CONTROL_APPLY_TIMEOUT", "2")
+    get_settings.cache_clear()
+
+    def slow_responder(req: dict) -> dict:
+        time.sleep(0.5)
+        return {"ok": True, "success": True, "validation_detail": "postconf: OK", "reloaded": True}
+
+    control_socket(slow_responder)
+    result = apply_config(main_cf="main", master_cf="master", maps={}, reload_if_main_changed=True)
+    assert result.success is True
+
+
+def test_other_ops_still_use_the_short_default_timeout(monkeypatch: pytest.MonkeyPatch, control_socket) -> None:
+    """The other side of the same fix: a non-apply op must NOT get the
+    longer apply timeout — an unreachable/hung control surface should
+    still fail fast for these."""
+    monkeypatch.setenv("RELAY_POSTFIX_CONTROL_TIMEOUT", "0.2")
+    monkeypatch.setenv("RELAY_POSTFIX_CONTROL_APPLY_TIMEOUT", "5")
+    get_settings.cache_clear()
+
+    def slow_responder(req: dict) -> dict:
+        time.sleep(0.5)
+        return {"ok": True}
+
+    control_socket(slow_responder)
+    with pytest.raises(PostfixControlError):
+        sasl_set_user("x", "y")
 
 
 def test_status_running(control_socket) -> None:

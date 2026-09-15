@@ -15,7 +15,7 @@ class PostfixControlError(RuntimeError):
     application itself is broken."""
 
 
-def _call(op: str, payload: dict) -> dict:
+def _call(op: str, payload: dict, *, timeout: float | None = None) -> dict:
     if not hasattr(socket, "AF_UNIX"):
         # The documented deployment target (Linux, inside the postfix
         # container) always has this; surfacing it as PostfixControlError
@@ -29,7 +29,7 @@ def _call(op: str, payload: dict) -> dict:
 
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(settings.postfix_control_timeout)
+            sock.settimeout(timeout if timeout is not None else settings.postfix_control_timeout)
             sock.connect(settings.postfix_control_socket)
             sock.sendall(request.encode("utf-8"))
             sock.shutdown(socket.SHUT_WR)
@@ -85,7 +85,13 @@ def apply_config(
     is the only place `postconf`/`postmap`/the live config directory
     actually exist. `success: False` is an expected outcome (the generated
     config didn't validate) reported here, not raised as
-    PostfixControlError — the RPC itself succeeded."""
+    PostfixControlError — the RPC itself succeeded.
+
+    Uses its own, longer timeout (postfix_control_apply_timeout) rather
+    than the default postfix_control_timeout: a reload that needs to stop
+    and start Postfix can legitimately take far longer than every other
+    op here, which are all fast by comparison.
+    """
     response = _call(
         "apply_config",
         {
@@ -94,6 +100,7 @@ def apply_config(
             "maps": maps,
             "reload_if_main_changed": reload_if_main_changed,
         },
+        timeout=get_settings().postfix_control_apply_timeout,
     )
     return ApplyConfigResult(
         success=response.get("success", False),
