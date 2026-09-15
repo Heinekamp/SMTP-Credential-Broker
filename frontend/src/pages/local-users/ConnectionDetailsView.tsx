@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Button, Card } from "../../design-system/components";
 import { getConnectionDetails } from "../../lib/api/localUsers";
+import { copyToClipboard } from "../../lib/clipboard";
 
 // Design handoff §7's Connection Details view — read-only, and password is
 // deliberately never shown here (never a second place the secret is
@@ -16,9 +17,9 @@ export function ConnectionDetailsView() {
     queryKey: ["local-users", userId, "connection-details"],
     queryFn: () => getConnectionDetails(userId),
   });
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
-  async function copyAll() {
+  function copyAll() {
     if (!data) return;
     const text = [
       `Host: ${data.host}`,
@@ -26,12 +27,7 @@ export function ConnectionDetailsView() {
       `Username: ${data.username}`,
       `From: ${data.from_addresses.join(", ") || "— none allowed yet —"}`,
     ].join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      // See PasswordReveal.tsx's copy() — same degraded-convenience case.
-    }
+    setCopyState(copyToClipboard(text) ? "copied" : "failed");
   }
 
   return (
@@ -54,12 +50,18 @@ export function ConnectionDetailsView() {
 
       <div style={{ display: "flex", gap: 8 }}>
         <Button variant="accent" onClick={copyAll}>
-          {copied ? "Copied" : "Copy All"}
+          {copyState === "copied" ? "Copied" : "Copy All"}
         </Button>
         <Button variant="default" onClick={() => navigate("/local-users")}>
           Done
         </Button>
       </div>
+
+      {copyState === "failed" && (
+        <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginTop: 8, marginBottom: 0 }}>
+          Couldn't copy automatically — select the fields above and copy them manually.
+        </p>
+      )}
     </Card>
   );
 }

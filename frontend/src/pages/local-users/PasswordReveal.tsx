@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, Card, Icon } from "../../design-system/components";
+import { copyToClipboard } from "../../lib/clipboard";
 
 // Design handoff §7's most security-sensitive screen: a 3px top border in
 // --brand-yellow (the "reduced protection, stay alert" caution color —
@@ -13,18 +14,10 @@ export function PasswordReveal() {
   const navigate = useNavigate();
   const location = useLocation();
   const password = (location.state as { password?: string } | null)?.password;
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(password ?? "");
-      setCopied(true);
-    } catch {
-      // Clipboard access can be denied (browser permissions, insecure
-      // context, embedded viewers) — the password stays visible and
-      // selectable in the box either way, so this is a degraded
-      // convenience, not a broken flow.
-    }
+  function copy() {
+    setCopyState(copyToClipboard(password ?? "") ? "copied" : "failed");
   }
 
   if (!password) {
@@ -71,9 +64,15 @@ export function PasswordReveal() {
           {password}
         </code>
         <Button variant="default" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
+          {copyState === "copied" ? "Copied" : "Copy"}
         </Button>
       </div>
+
+      {copyState === "failed" && (
+        <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginTop: -8, marginBottom: 16 }}>
+          Couldn't copy automatically — select the password above and copy it manually (Ctrl+C).
+        </p>
+      )}
 
       <Button variant="accent" onClick={() => navigate("/local-users")}>
         Done
