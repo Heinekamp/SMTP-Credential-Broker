@@ -88,12 +88,24 @@ def _validate_staged_config(main_cf: str, master_cf: str) -> tuple[bool, str]:
             f.write(main_cf)
         with open(os.path.join(staging_dir, "master.cf"), "w", encoding="utf-8") as f:
             f.write(master_cf)
-        result = _run(["postconf", "-c", staging_dir, "-n"])
-        detail = (result.stdout + result.stderr).strip()
+        main_result = _run(["postconf", "-c", staging_dir, "-n"])
+        # `postconf -n` only validates/dumps *main.cf* parameters — it
+        # never parses master.cf at all, so a broken master.cf (found via
+        # code review: nothing here previously validated its syntax)
+        # would sail through this check and only fail later, after
+        # install, when `postfix start` itself chokes on it. `-M` forces
+        # postconf to also parse and print master.cf's service table,
+        # catching the same class of syntax error here instead, while
+        # nothing on disk has been touched yet.
+        master_result = _run(["postconf", "-c", staging_dir, "-M"])
+        detail = (
+            main_result.stdout + main_result.stderr + master_result.stdout + master_result.stderr
+        ).strip()
         # postconf exits non-zero on a hard parse error; "warning:" lines
         # about unknown parameters are noise we still want to see but not
         # treat as fatal, so the check is on returncode, not stderr content.
-        return result.returncode == 0, detail or "postconf: OK"
+        valid = main_result.returncode == 0 and master_result.returncode == 0
+        return valid, detail or "postconf: OK"
 
 
 def _install_maps(maps: dict[str, str]) -> None:
@@ -109,8 +121,30 @@ def _install_maps(maps: dict[str, str]) -> None:
             raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
 
 
-def _install_config(main_cf: str, master_cf: str) -> None:
+def _install_config(main_cf: str, master_cf: str) -> dict[str, str | None]:
+    """Installs main.cf/master.cf atomically, returning each file's
+    previous content (None if it didn't exist yet — this container's very
+    first boot) so a failed `postfix start` afterward has something to
+    roll back to."""
+    previous: dict[str, str | None] = {}
     for filename, content in (("main.cf", main_cf), ("master.cf", master_cf)):
+        live_path = os.path.join(POSTFIX_CONFIG_DIR, filename)
+        try:
+            with open(live_path, encoding="utf-8") as f:
+                previous[filename] = f.read()
+        except OSError:
+            previous[filename] = None
+        tmp_path = live_path + ".new"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, live_path)
+    return previous
+
+
+def _restore_config(previous: dict[str, str | None]) -> None:
+    for filename, content in previous.items():
+        if content is None:  # didn't exist before install — nothing to restore
+            continue
         live_path = os.path.join(POSTFIX_CONFIG_DIR, filename)
         tmp_path = live_path + ".new"
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -136,7 +170,7 @@ def _apply_config(payload: dict) -> dict:
         # No such file or directory") if main.cf isn't there yet, which is
         # exactly the state on this container's very first boot before any
         # config has ever been installed.
-        _install_config(main_cf, master_cf)
+        previous_config = _install_config(main_cf, master_cf)
         _install_maps(maps)
     except (OSError, RuntimeError) as exc:
         return {"ok": True, "success": False, "validation_detail": f"install failed: {exc}", "reloaded": False}
@@ -156,10 +190,29 @@ def _apply_config(payload: dict) -> dict:
         start_result = _run(["postfix", "start"])
         if start_result.returncode != 0:
             combined = f"{start_result.stdout}\n{start_result.stderr}".strip()
+            # postconf -n/-M passed but a defect only `postfix start`
+            # itself catches (e.g. a master.cf service pointing at a
+            # chroot/queue path that doesn't exist) still slipped through
+            # validation. The new, broken config is already installed at
+            # this point — restore what was there before and try to get
+            # the relay back up with it, rather than leaving it stopped
+            # with the broken config still on disk (architecture.md §5's
+            # "previous config stays active" invariant otherwise only
+            # held up to the point of install, not through this failure
+            # mode).
+            rollback_detail = ""
+            if any(value is not None for value in previous_config.values()):
+                _restore_config(previous_config)
+                rollback_start = _run(["postfix", "start"])
+                rollback_detail = (
+                    "; rolled back to the previous config and restarted successfully"
+                    if rollback_start.returncode == 0
+                    else f"; rollback to the previous config ALSO failed to start: {rollback_start.stderr.strip()}"
+                )
             return {
                 "ok": True,
                 "success": False,
-                "validation_detail": f"{detail}\npostfix start failed: {combined}",
+                "validation_detail": f"{detail}\npostfix start failed: {combined}{rollback_detail}",
                 "reloaded": False,
             }
         reloaded = True

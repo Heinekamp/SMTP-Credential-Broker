@@ -101,3 +101,127 @@ def test_existence_check_falls_back_to_true_when_sasldblistusers2_itself_fails(
     monkeypatch.setattr(control_surface, "_run", fake_run)
 
     assert control_surface._sasl_user_exists("inventree") is True
+
+
+def test_validate_staged_config_catches_a_master_cf_syntax_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: validation used to only run `postconf -n`, which
+    never parses master.cf at all — a broken master.cf would sail through
+    and only fail later, after install, when `postfix start` itself
+    choked on it. `postconf -M` is the one that actually parses master.cf."""
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if args[-1] == "-n":
+            return _completed(0, stdout="mail_version = 3.8.6\n")
+        assert args[-1] == "-M"
+        return _completed(1, stderr="postconf: fatal: bad master.cf syntax on line 4")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    valid, detail = control_surface._validate_staged_config("main", "master")
+
+    assert valid is False
+    assert "bad master.cf syntax" in detail
+
+
+def _fixed_apply_payload() -> dict:
+    return {"main_cf": "new main", "master_cf": "new master", "maps": {}, "reload_if_main_changed": True}
+
+
+def test_apply_config_rolls_back_when_postfix_start_fails_after_a_valid_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression test: postconf -n/-M can pass while `postfix start`
+    itself still fails (e.g. a master.cf service pointing at a
+    chroot/queue path that doesn't exist) — a defect validation can't
+    catch. The newly-installed, broken config used to just stay on disk
+    with the relay left stopped. It must instead restore the config that
+    was live before this apply and get the relay back up with it."""
+    config_dir = tmp_path / "postfix"
+    config_dir.mkdir()
+    (config_dir / "main.cf").write_text("old main", encoding="utf-8")
+    (config_dir / "master.cf").write_text("old master", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "POSTFIX_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path / "relay"))
+
+    start_attempts = {"count": 0}
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if args[0] == "postconf":
+            return _completed(0)
+        if args == ["postfix", "stop"]:
+            return _completed(0)
+        if args == ["postfix", "start"]:
+            start_attempts["count"] += 1
+            if start_attempts["count"] == 1:
+                return _completed(1, stderr="fatal: bad service in master.cf")
+            return _completed(0)
+        raise AssertionError(f"unexpected call: {args}")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._apply_config(_fixed_apply_payload())
+
+    assert result["success"] is False
+    assert "rolled back to the previous config and restarted successfully" in result["validation_detail"]
+    assert (config_dir / "main.cf").read_text(encoding="utf-8") == "old main"
+    assert (config_dir / "master.cf").read_text(encoding="utf-8") == "old master"
+    assert start_attempts["count"] == 2
+
+
+def test_apply_config_reports_when_the_rollback_start_also_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    config_dir = tmp_path / "postfix"
+    config_dir.mkdir()
+    (config_dir / "main.cf").write_text("old main", encoding="utf-8")
+    (config_dir / "master.cf").write_text("old master", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "POSTFIX_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path / "relay"))
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if args[0] == "postconf":
+            return _completed(0)
+        if args == ["postfix", "stop"]:
+            return _completed(0)
+        if args == ["postfix", "start"]:
+            return _completed(1, stderr="still broken")
+        raise AssertionError(f"unexpected call: {args}")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._apply_config(_fixed_apply_payload())
+
+    assert result["success"] is False
+    assert "rollback to the previous config ALSO failed to start" in result["validation_detail"]
+
+
+def test_apply_config_on_first_boot_has_nothing_to_roll_back_to(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """First boot: no main.cf/master.cf exists yet, so a failed
+    `postfix start` has no previous config to restore — must not attempt
+    a pointless rollback restart."""
+    config_dir = tmp_path / "postfix"
+    config_dir.mkdir()
+    monkeypatch.setattr(control_surface, "POSTFIX_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path / "relay"))
+
+    start_attempts = {"count": 0}
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if args[0] == "postconf":
+            return _completed(0)
+        if args == ["postfix", "stop"]:
+            return _completed(0)
+        if args == ["postfix", "start"]:
+            start_attempts["count"] += 1
+            return _completed(1, stderr="fatal: bad service in master.cf")
+        raise AssertionError(f"unexpected call: {args}")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._apply_config(_fixed_apply_payload())
+
+    assert result["success"] is False
+    assert "rolled back" not in result["validation_detail"]
+    assert start_attempts["count"] == 1
