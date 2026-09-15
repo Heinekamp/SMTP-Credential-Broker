@@ -114,6 +114,27 @@ adjust the threshold if it's genuinely too aggressive for your environment
 "unlock" action by design, since that would itself be a brute-force
 bypass vector.
 
+### Locked out? (forgotten password or lost authenticator device)
+
+No admin can reset another admin's password or TOTP from the web UI or
+API — by design, the same way there's no admin-facing rate-limit
+"unlock" above. If the admin who forgot their password or lost their
+authenticator is the only admin (or every other admin account is also
+unreachable), recover from the command line instead:
+
+```bash
+docker compose exec app relay reset-admin-password admin@example.com
+docker compose exec app relay disable-totp admin@example.com
+```
+
+`reset-admin-password` prompts for (and confirms) a new password;
+`disable-totp` removes the TOTP secret so the next login only needs the
+password. Both revoke every one of that admin's currently active
+sessions immediately — the same thing a self-service password change
+does (security-model.md's stolen-session-token row) — and both are
+recorded in the audit log with no acting admin (`admin_user_id` null),
+the same convention used for scheduler-triggered rows.
+
 ## Mail Log
 
 ### A message shows in the Postfix queue but never appears in the Mail Log screen

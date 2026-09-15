@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from app.core.audit import record_audit
 from app.core.config_generator import generate_and_apply
 from app.core.encryption import (
     DecryptionFailed,
@@ -16,6 +17,7 @@ from app.core.encryption import (
 from app.core.health import run_health_check
 from app.core.postfix_control import PostfixControlError, queue_list
 from app.core.security import hash_password
+from app.core.sessions import revoke_all_sessions_for_admin
 from app.core.test_connection import test_upstream_connection
 from app.db.session import SessionLocal
 from app.models.admin import AdminUser
@@ -44,6 +46,61 @@ def create_admin(
         db.add(admin)
         db.commit()
         typer.echo(f"Created admin account: {email}")
+    finally:
+        db.close()
+
+
+@cli.command("reset-admin-password")
+def reset_admin_password(
+    email: str = typer.Argument(..., help="Email of the admin to reset"),
+    password: str = typer.Option(..., prompt=True, hide_input=True, confirmation_prompt=True),
+) -> None:
+    """Break-glass recovery for a forgotten admin password — with no web
+    UI path to reset another admin's credentials (by design: no admin can
+    reset another admin's password from the API either) and no
+    "unlock"/self-service reset flow, this was previously only possible
+    by hand-editing the database. Revokes every one of that admin's
+    active sessions, same as a self-service password change (a stolen
+    session is exactly the kind of thing a forgotten-password recovery
+    should not leave usable)."""
+    db = SessionLocal()
+    try:
+        admin = db.query(AdminUser).filter(AdminUser.email == email).one_or_none()
+        if admin is None:
+            typer.echo(f"No admin with email {email!r}.", err=True)
+            raise typer.Exit(code=1)
+        admin.password_hash = hash_password(password)
+        revoke_all_sessions_for_admin(db, admin.id)
+        record_audit(
+            db, admin_user_id=None, action="admin.reset_password", target_type="admin_user", target_id=admin.id
+        )
+        db.commit()
+        typer.echo(f"Password reset for {email}.")
+    finally:
+        db.close()
+
+
+@cli.command("disable-totp")
+def disable_totp(email: str = typer.Argument(..., help="Email of the admin to disable TOTP for")) -> None:
+    """Break-glass recovery for a lost authenticator device — the API
+    only ever exposes /me/totp/remove (self-service, requires already
+    being logged in), so a locked-out admin with no other admin account
+    had no way back in short of hand-editing the database. Revokes every
+    active session, same rationale as reset-admin-password."""
+    db = SessionLocal()
+    try:
+        admin = db.query(AdminUser).filter(AdminUser.email == email).one_or_none()
+        if admin is None:
+            typer.echo(f"No admin with email {email!r}.", err=True)
+            raise typer.Exit(code=1)
+        if admin.totp_secret_encrypted is None:
+            typer.echo(f"{email} does not have TOTP enabled.")
+            return
+        admin.totp_secret_encrypted = None
+        revoke_all_sessions_for_admin(db, admin.id)
+        record_audit(db, admin_user_id=None, action="admin.totp_remove", target_type="admin_user", target_id=admin.id)
+        db.commit()
+        typer.echo(f"TOTP disabled for {email}.")
     finally:
         db.close()
 
