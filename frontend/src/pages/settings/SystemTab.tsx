@@ -144,6 +144,55 @@ export function SystemTab() {
         </div>
       </Card>
 
+      <Card title="Data Retention">
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
+          Automatically deletes old Mail Log and Audit Log entries. Off by default — nothing is ever deleted
+          until you set a window here.
+        </p>
+        <div style={fieldLabelStyle}>Mail Log</div>
+        <Select
+          value={mailLogRetention}
+          onChange={(e) => setMailLogRetention(e.target.value)}
+          style={{ width: "100%", marginBottom: 12 }}
+        >
+          {RETENTION_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+        <div style={fieldLabelStyle}>Audit Log</div>
+        <Select
+          value={auditLogRetention}
+          onChange={(e) => setAuditLogRetention(e.target.value)}
+          style={{ width: "100%", marginBottom: 16 }}
+        >
+          {RETENTION_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+        <Button
+          variant="accent"
+          onClick={() => {
+            setRetentionSaved(false);
+            saveRetention.mutate();
+          }}
+          disabled={saveRetention.isPending}
+        >
+          {saveRetention.isPending ? "Saving…" : "Save"}
+        </Button>
+        {retentionSaved && !saveRetention.isPending && (
+          <span style={{ marginLeft: 10, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>Saved.</span>
+        )}
+        {saveRetention.isError && (
+          <span style={{ marginLeft: 10, color: "var(--status-fault)", fontSize: "var(--text-sm)" }}>
+            Could not save.
+          </span>
+        )}
+      </Card>
+
       <Card title="Config Generation History" wide>
         {isLoading && <div style={skeletonBarStyle} />}
         {generations && generations.length === 0 && (
@@ -195,55 +244,6 @@ export function SystemTab() {
               ))}
             </tbody>
           </table>
-        )}
-      </Card>
-
-      <Card title="Data Retention">
-        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
-          Automatically deletes old Mail Log and Audit Log entries. Off by default — nothing is ever deleted
-          until you set a window here.
-        </p>
-        <div style={fieldLabelStyle}>Mail Log</div>
-        <Select
-          value={mailLogRetention}
-          onChange={(e) => setMailLogRetention(e.target.value)}
-          style={{ width: "100%", marginBottom: 12 }}
-        >
-          {RETENTION_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </Select>
-        <div style={fieldLabelStyle}>Audit Log</div>
-        <Select
-          value={auditLogRetention}
-          onChange={(e) => setAuditLogRetention(e.target.value)}
-          style={{ width: "100%", marginBottom: 16 }}
-        >
-          {RETENTION_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </Select>
-        <Button
-          variant="accent"
-          onClick={() => {
-            setRetentionSaved(false);
-            saveRetention.mutate();
-          }}
-          disabled={saveRetention.isPending}
-        >
-          {saveRetention.isPending ? "Saving…" : "Save"}
-        </Button>
-        {retentionSaved && !saveRetention.isPending && (
-          <span style={{ marginLeft: 10, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>Saved.</span>
-        )}
-        {saveRetention.isError && (
-          <span style={{ marginLeft: 10, color: "var(--status-fault)", fontSize: "var(--text-sm)" }}>
-            Could not save.
-          </span>
         )}
       </Card>
     </div>
