@@ -64,3 +64,26 @@ def revoke_session(db: Session, raw_token: str) -> None:
     if session is not None and session.revoked_at is None:
         session.revoked_at = utcnow()
         db.flush()
+
+
+def revoke_all_sessions_for_admin(db: Session, admin_user_id: int, *, except_token: str | None = None) -> None:
+    """Called whenever a credential materially changes (password, TOTP
+    enrolled/removed) so a session cookie stolen before the change can't
+    keep working after the legitimate admin "fixes" it from a different
+    session (security-model.md's stolen-session-token row didn't cover
+    this — the token itself stayed valid until it naturally expired).
+
+    `except_token`, when given, keeps the session that made this very
+    request alive — otherwise the admin would be logged out by the same
+    request that changed their own password."""
+    except_hash = _hash_token(except_token) if except_token else None
+    now = utcnow()
+    query = db.query(AdminSession).filter(
+        AdminSession.admin_user_id == admin_user_id,
+        AdminSession.revoked_at.is_(None),
+    )
+    if except_hash is not None:
+        query = query.filter(AdminSession.token_hash != except_hash)
+    for session in query.all():
+        session.revoked_at = now
+    db.flush()

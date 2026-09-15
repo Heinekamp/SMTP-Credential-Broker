@@ -4,9 +4,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
+from app.api.routes.auth import SESSION_COOKIE_NAME
 from app.core.audit import client_ip, record_audit
 from app.core.encryption import EncryptionKeyNotConfigured, encrypt_secret
 from app.core.security import hash_password, verify_password
+from app.core.sessions import revoke_all_sessions_for_admin
 from app.models.admin import AdminUser
 from app.schemas.admin import AdminCreate, AdminRead, ChangePasswordRequest, TotpConfirmRequest, TotpEnrollResponse
 
@@ -71,6 +73,10 @@ def change_own_password(
     if not verify_password(admin.password_hash, payload.current_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect")
     admin.password_hash = hash_password(payload.new_password)
+    # A session cookie stolen before this change must not keep working
+    # after it — except the one making this very request, so the admin
+    # isn't logged out by their own password change.
+    revoke_all_sessions_for_admin(db, admin.id, except_token=request.cookies.get(SESSION_COOKIE_NAME))
     record_audit(
         db,
         admin_user_id=admin.id,
@@ -107,6 +113,7 @@ def confirm_totp(
         admin.totp_secret_encrypted = encrypt_secret(payload.secret)
     except EncryptionKeyNotConfigured as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    revoke_all_sessions_for_admin(db, admin.id, except_token=request.cookies.get(SESSION_COOKIE_NAME))
     record_audit(
         db,
         admin_user_id=admin.id,
@@ -125,6 +132,7 @@ def remove_totp(
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
     admin.totp_secret_encrypted = None
+    revoke_all_sessions_for_admin(db, admin.id, except_token=request.cookies.get(SESSION_COOKIE_NAME))
     record_audit(
         db,
         admin_user_id=admin.id,

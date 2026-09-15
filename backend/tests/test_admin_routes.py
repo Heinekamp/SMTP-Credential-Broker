@@ -1,6 +1,7 @@
 import pyotp
 from fastapi.testclient import TestClient
 
+from app.main import app
 from tests.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, csrf_headers
 
 
@@ -58,6 +59,28 @@ def test_change_own_password(admin_client: TestClient) -> None:
         "/api/auth/login", json={"email": ADMIN_EMAIL, "password": "New-Sup3rSecret!"}
     )
     assert succeeded.status_code == 200
+
+
+def test_change_own_password_revokes_other_sessions_but_keeps_this_one(admin_client: TestClient) -> None:
+    """Regression test: a session cookie stolen before a password change
+    used to keep working after it — nothing correlated sessions to the
+    admin row and revoked them on a credential change. The session that
+    made the change itself must survive, though, or the admin would be
+    logged out by their own password change."""
+    other_client = TestClient(app)
+    login = other_client.post("/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert login.status_code == 200
+    assert other_client.get("/api/admins").status_code == 200
+
+    response = admin_client.post(
+        "/api/admins/me/change-password",
+        json={"current_password": ADMIN_PASSWORD, "new_password": "New-Sup3rSecret!"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 204
+
+    assert other_client.get("/api/admins").status_code == 401
+    assert admin_client.get("/api/admins").status_code == 200
 
 
 def test_change_own_password_wrong_current_password_is_401(admin_client: TestClient) -> None:
@@ -121,6 +144,29 @@ def test_totp_remove_disables_it(admin_client: TestClient) -> None:
 
     response = admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
     assert response.status_code == 204
+
+
+def test_totp_remove_revokes_other_sessions_but_keeps_this_one(admin_client: TestClient) -> None:
+    enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
+    code = pyotp.TOTP(enroll["secret"]).now()
+    admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": enroll["secret"], "code": code},
+        headers=csrf_headers(admin_client),
+    )
+
+    other_client = TestClient(app)
+    login = other_client.post(
+        "/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "totp_code": code}
+    )
+    assert login.status_code == 200
+    assert other_client.get("/api/admins").status_code == 200
+
+    response = admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
+    assert response.status_code == 204
+
+    assert other_client.get("/api/admins").status_code == 401
+    assert admin_client.get("/api/admins").status_code == 200
 
     admins = admin_client.get("/api/admins").json()
     me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
