@@ -15,8 +15,17 @@ class AdminRead(BaseModel):
     email: str
     # Never the secret itself — just whether one is enrolled (security-model.md §5).
     totp_enabled: bool
+    is_active: bool
     created_at: datetime.datetime
     last_login_at: datetime.datetime | None
+
+
+class AdminUpdate(BaseModel):
+    """Only `is_active` is settable here — deliberately not a general
+    admin-editing endpoint. There's still no admin-resets-another-admin's-
+    password/TOTP path; this is purely for deactivate/reactivate."""
+
+    is_active: bool
 
 
 class ChangePasswordRequest(BaseModel):

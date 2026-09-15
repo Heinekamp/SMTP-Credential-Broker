@@ -10,7 +10,14 @@ from app.core.encryption import EncryptionKeyNotConfigured, encrypt_secret
 from app.core.security import hash_password, verify_password
 from app.core.sessions import revoke_all_sessions_for_admin
 from app.models.admin import AdminUser
-from app.schemas.admin import AdminCreate, AdminRead, ChangePasswordRequest, TotpConfirmRequest, TotpEnrollResponse
+from app.schemas.admin import (
+    AdminCreate,
+    AdminRead,
+    AdminUpdate,
+    ChangePasswordRequest,
+    TotpConfirmRequest,
+    TotpEnrollResponse,
+)
 
 router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_current_admin)])
 
@@ -24,6 +31,7 @@ def _to_read(admin: AdminUser) -> AdminRead:
         id=admin.id,
         email=admin.email,
         totp_enabled=admin.totp_secret_encrypted is not None,
+        is_active=admin.is_active,
         created_at=admin.created_at,
         last_login_at=admin.last_login_at,
     )
@@ -61,6 +69,46 @@ def create_admin(
     )
     db.commit()
     return _to_read(new_admin)
+
+
+@router.patch("/{admin_id}", response_model=AdminRead, dependencies=[Depends(require_csrf)])
+def update_admin(
+    admin_id: int,
+    payload: AdminUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(get_current_admin),
+) -> AdminRead:
+    """Deactivate/reactivate another admin without deleting their audit
+    history (admin_users.is_active exists for exactly this — until now,
+    nothing ever set it). Deactivating revokes every one of their active
+    sessions immediately (get_current_admin_optional already rejects a
+    request from an inactive admin regardless, but this also means a
+    later reactivation doesn't silently hand back access via a session
+    that was never explicitly ended)."""
+    target = db.get(AdminUser, admin_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Admin not found")
+
+    if payload.is_active != target.is_active:
+        if not payload.is_active:
+            active_count = db.query(AdminUser).filter(AdminUser.is_active.is_(True)).count()
+            if active_count <= 1:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Can't deactivate the last active admin")
+            revoke_all_sessions_for_admin(db, target.id)
+        target.is_active = payload.is_active
+        record_audit(
+            db,
+            admin_user_id=admin.id,
+            action="admin.reactivate" if payload.is_active else "admin.deactivate",
+            target_type="admin_user",
+            target_id=target.id,
+            detail={"email": target.email},
+            ip_address=client_ip(request),
+        )
+        db.commit()
+        db.refresh(target)
+    return _to_read(target)
 
 
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])

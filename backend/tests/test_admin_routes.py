@@ -43,6 +43,96 @@ def test_create_admin_requires_csrf(admin_client: TestClient) -> None:
     assert response.status_code == 403
 
 
+def test_deactivate_and_reactivate_another_admin(admin_client: TestClient) -> None:
+    created = admin_client.post(
+        "/api/admins",
+        json={"email": "second@example.com", "password": "Sup3rSecret!"},
+        headers=csrf_headers(admin_client),
+    ).json()
+
+    response = admin_client.patch(
+        f"/api/admins/{created['id']}", json={"is_active": False}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+    response = admin_client.patch(
+        f"/api/admins/{created['id']}", json={"is_active": True}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 200
+    assert response.json()["is_active"] is True
+
+
+def test_deactivating_the_last_active_admin_is_409(admin_client: TestClient) -> None:
+    me = next(a for a in admin_client.get("/api/admins").json() if a["email"] == ADMIN_EMAIL)
+
+    response = admin_client.patch(
+        f"/api/admins/{me['id']}", json={"is_active": False}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 409
+
+
+def test_deactivating_one_of_two_active_admins_is_allowed(admin_client: TestClient) -> None:
+    created = admin_client.post(
+        "/api/admins",
+        json={"email": "second@example.com", "password": "Sup3rSecret!"},
+        headers=csrf_headers(admin_client),
+    ).json()
+
+    response = admin_client.patch(
+        f"/api/admins/{created['id']}", json={"is_active": False}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 200
+
+    # Now only the original admin is active — deactivating them, too,
+    # must be rejected.
+    me = next(a for a in admin_client.get("/api/admins").json() if a["email"] == ADMIN_EMAIL)
+    response = admin_client.patch(
+        f"/api/admins/{me['id']}", json={"is_active": False}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 409
+
+
+def test_deactivating_an_admin_revokes_their_sessions(admin_client: TestClient) -> None:
+    created = admin_client.post(
+        "/api/admins",
+        json={"email": "second@example.com", "password": "Sup3rSecret!"},
+        headers=csrf_headers(admin_client),
+    ).json()
+
+    other_client = TestClient(app)
+    login = other_client.post("/api/auth/login", json={"email": "second@example.com", "password": "Sup3rSecret!"})
+    assert login.status_code == 200
+    assert other_client.get("/api/admins").status_code == 200
+
+    admin_client.patch(f"/api/admins/{created['id']}", json={"is_active": False}, headers=csrf_headers(admin_client))
+
+    assert other_client.get("/api/admins").status_code == 401
+
+
+def test_deactivated_admin_cannot_log_back_in(admin_client: TestClient) -> None:
+    created = admin_client.post(
+        "/api/admins",
+        json={"email": "second@example.com", "password": "Sup3rSecret!"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    admin_client.patch(f"/api/admins/{created['id']}", json={"is_active": False}, headers=csrf_headers(admin_client))
+
+    other_client = TestClient(app)
+    login = other_client.post("/api/auth/login", json={"email": "second@example.com", "password": "Sup3rSecret!"})
+    assert login.status_code == 401
+
+
+def test_update_missing_admin_is_404(admin_client: TestClient) -> None:
+    response = admin_client.patch("/api/admins/999999", json={"is_active": False}, headers=csrf_headers(admin_client))
+    assert response.status_code == 404
+
+
+def test_update_admin_requires_csrf(admin_client: TestClient) -> None:
+    response = admin_client.patch("/api/admins/1", json={"is_active": False})
+    assert response.status_code == 403
+
+
 def test_change_own_password(admin_client: TestClient) -> None:
     response = admin_client.post(
         "/api/admins/me/change-password",

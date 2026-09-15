@@ -7,7 +7,7 @@ import { ChangePasswordModal } from "../../components/ChangePasswordModal";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { TotpEnrollModal } from "../../components/TotpEnrollModal";
 import { ApiError } from "../../lib/apiClient";
-import { createAdmin, listAdmins, removeTotp } from "../../lib/api/admins";
+import { createAdmin, listAdmins, removeTotp, setAdminActive, type AdminRead } from "../../lib/api/admins";
 import { useSession } from "../../lib/useSession";
 
 const QUERY_KEY = ["admins"];
@@ -29,6 +29,22 @@ export function AdminsTab() {
   const [enrollingTotp, setEnrollingTotp] = useState(false);
   const [removingTotp, setRemovingTotp] = useState(false);
   const [removeTotpError, setRemoveTotpError] = useState<string | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<AdminRead | null>(null);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+
+  const setActive = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => setAdminActive(id, isActive),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setDeactivateTarget(null);
+      setDeactivateError(null);
+    },
+    onError: (err) => {
+      setDeactivateError(
+        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not change this admin's status.",
+      );
+    },
+  });
 
   const remove = useMutation({
     mutationFn: () => removeTotp(),
@@ -118,7 +134,7 @@ export function AdminsTab() {
         <table style={tableStyle}>
           <thead>
             <tr>
-              {["Email", "TOTP", "Actions"].map((label) => (
+              {["Email", "Status", "TOTP", "Actions"].map((label) => (
                 <th key={label} style={thStyle}>
                   {label}
                 </th>
@@ -131,36 +147,58 @@ export function AdminsTab() {
                 <td style={tdStyle}>{admin.email}</td>
                 <td style={tdStyle}>
                   <StatusBadge
+                    status={admin.is_active ? "idle" : "waiting"}
+                    label={admin.is_active ? "Active" : "Inactive"}
+                    size="sm"
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <StatusBadge
                     status={admin.totp_enabled ? "idle" : "waiting"}
                     label={admin.totp_enabled ? "Enabled" : "Disabled"}
                     size="sm"
                   />
                 </td>
                 <td style={tdStyle}>
-                  {admin.email === session?.email ? (
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                      {admin.totp_enabled ? (
-                        <Button
-                          variant="default"
-                          onClick={() => {
-                            setRemovingTotp(true);
-                            setRemoveTotpError(null);
-                          }}
-                        >
-                          Remove TOTP
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    {admin.email === session?.email && (
+                      <>
+                        {admin.totp_enabled ? (
+                          <Button
+                            variant="default"
+                            onClick={() => {
+                              setRemovingTotp(true);
+                              setRemoveTotpError(null);
+                            }}
+                          >
+                            Remove TOTP
+                          </Button>
+                        ) : (
+                          <Button variant="default" onClick={() => setEnrollingTotp(true)}>
+                            Enroll TOTP
+                          </Button>
+                        )}
+                        <Button variant="default" onClick={() => setChangingOwnPassword(true)}>
+                          Change Password
                         </Button>
-                      ) : (
-                        <Button variant="default" onClick={() => setEnrollingTotp(true)}>
-                          Enroll TOTP
-                        </Button>
-                      )}
-                      <Button variant="default" onClick={() => setChangingOwnPassword(true)}>
-                        Change Password
+                      </>
+                    )}
+                    {admin.is_active ? (
+                      <Button
+                        variant="default"
+                        onClick={() => {
+                          setDeactivateTarget(admin);
+                          setDeactivateError(null);
+                        }}
+                      >
+                        Deactivate
                       </Button>
-                    </div>
-                  ) : (
-                    <span style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)" }}>—</span>
-                  )}
+                    ) : (
+                      <Button variant="default" onClick={() => setActive.mutate({ id: admin.id, isActive: true })}>
+                        Reactivate
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -195,6 +233,26 @@ export function AdminsTab() {
             setRemoveTotpError(null);
           }}
           onConfirm={() => remove.mutate()}
+        />
+      )}
+
+      {deactivateTarget && (
+        <ConfirmModal
+          title={`Deactivate "${deactivateTarget.email}"?`}
+          body={
+            deactivateTarget.email === session?.email
+              ? "This immediately signs you out on every device. You can reactivate this account later from another active admin's session."
+              : "This immediately revokes all of their active sessions. They won't be able to sign in until reactivated."
+          }
+          confirmLabel="Deactivate"
+          variant="danger"
+          confirming={setActive.isPending}
+          error={deactivateError}
+          onCancel={() => {
+            setDeactivateTarget(null);
+            setDeactivateError(null);
+          }}
+          onConfirm={() => setActive.mutate({ id: deactivateTarget.id, isActive: false })}
         />
       )}
     </div>
