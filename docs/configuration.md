@@ -47,6 +47,47 @@ right level of friction.
 | `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `relay_config` volume already wires this up correctly on both sides — only change this if you've renamed that volume's mount point. |
 | `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection" or config generation). |
 
+## TLS certificates
+
+The relay ships with a self-signed placeholder certificate on the
+submission port (baked into the `postfix` image at build time) — good
+enough for local testing, but most real SMTP clients (e.g. PHPMailer-based
+plugins like WP Mail SMTP) reject it during STARTTLS with something like
+"unknown ca" and drop the connection before AUTH, so the mail never even
+reaches the queue.
+
+Settings → TLS Certificate lets an admin provision a real, auto-renewing
+Let's Encrypt certificate instead, via a DNS-01 challenge — no inbound
+port 80/443 needed, so this works for a relay that's only reachable on a
+LAN. Cloudflare is the only supported DNS provider today; configure a
+domain, a Cloudflare API token scoped to `Zone:DNS:Edit` on that domain's
+zone, and enable it. "Verify Cloudflare Access" is a read-only precheck
+(no DNS record is created, no Let's Encrypt attempt spent) worth running
+before "Issue / Renew Now", which makes a real, rate-limited request
+against Let's Encrypt's production API.
+
+**The domain you configure here is independent of `RELAY_SUBMISSION_HOST`
+above.** This domain only needs to match what a connecting client
+validates the certificate's hostname against — it has no relationship to
+Postfix's `myhostname`, EHLO greeting, or SASL realm. You do not need (and
+generally should not) set them to the same value unless that's also
+genuinely the hostname clients connect to.
+
+Once issued, the certificate and its private key are stored encrypted in
+the database — the source of truth an app-startup check and the daily
+renewal check reconcile the Postfix container's live files against, so a
+lost `postfix_tls` volume or a recreated `postfix` container self-heals
+without re-issuing. Renewal happens automatically once a certificate is
+within 30 days of expiry; failures are visible in the same Settings tab.
+
+A real cert/key pair can still be mounted directly over
+`/etc/postfix/tls/relay.crt`/`relay.key` instead (e.g. from another CA) —
+this feature is purely an additional, automated path, not a requirement.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RELAY_ACME_DIRECTORY_URL` | Let's Encrypt production | Deliberately an environment variable, not a Settings toggle — a UI switch would risk a production relay being silently left pinned to Let's Encrypt's **staging** directory (whose certificates nothing trusts). Override only for manual verification against staging. |
+
 ## Scheduled testing, update checks, and alert email
 
 Unlike everything else in this document, these are **not** environment

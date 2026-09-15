@@ -78,10 +78,11 @@ Any service that speaks SMTP with `AUTH` + `STARTTLS` can use this relay.
 The Local SMTP Users screen's **Connection Details** view has the exact
 host/port/username to give it; the password is whatever was shown at
 creation/regeneration time. The relay's own TLS certificate is a
-self-signed placeholder baked into the `postfix` image — see
-[configuration.md](configuration.md)'s note on `postfix_tls` if the
-consuming service validates certificates strictly and you want to mount
-a real one.
+self-signed placeholder baked into the `postfix` image by default — most
+real clients (e.g. PHPMailer-based mailers) reject this during STARTTLS.
+See [configuration.md](configuration.md#tls-certificates) for provisioning
+a real, auto-renewing certificate from Settings → TLS Certificate, or
+mounting one manually.
 
 ## Exposed ports
 

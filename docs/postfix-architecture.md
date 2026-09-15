@@ -87,6 +87,12 @@ relay_domains =
 local_transport = error:local mail delivery is disabled on this relay
 
 # ── Client-facing (smtpd) TLS ───────────────────────────────────────
+# The two files these paths point at start out as the self-signed
+# placeholder baked into the postfix image at build time (Dockerfile),
+# but may also be populated by the `install_tls_certificate` control-
+# surface op (configuration.md's "TLS certificates" section) once an
+# admin enables Let's Encrypt from Settings — main.cf itself never
+# changes either way.
 smtpd_tls_cert_file = /etc/postfix/tls/relay.crt
 smtpd_tls_key_file = /etc/postfix/tls/relay.key
 smtpd_tls_security_level = encrypt
@@ -336,7 +342,8 @@ authenticates with its own local SMTP user and is bound by that user's
 | Add/edit an upstream account or change which upstream a sender uses | `sender_relayhost` + `sasl_passwd` sources + `.lmdb`s | **None**, same reason. |
 | Rotate an upstream account's password | `sasl_passwd` source + `.lmdb` only | **None.** `sender_login` and `sender_relayhost` are untouched — this is why credential rotation never affects local users' credentials (spec §25's rotation test). |
 | Add/remove a local SMTP user | `sasldb2` entry (via `saslpasswd2`) + `sender_login` (if permissions changed too) | **None** for `sasldb2` — the SASL library reads it per-authentication-attempt, not cached at process start. |
-| Change `myhostname`, add a new TLS certificate, or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix stop` + `postfix start` — see the note below on why this is a restart, not `postfix reload`. |
+| Change `myhostname` or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix stop` + `postfix start` — see the note below on why this is a restart, not `postfix reload`. |
+| Install/replace the TLS certificate (Settings → TLS Certificate, or a manual mount) | `relay.crt`/`relay.key` only, via the separate `install_tls_certificate` op — `main.cf` is untouched | Same `postfix stop` + `postfix start` convention as any other live-file change, after verifying (via `openssl`) the new key actually matches the new cert and isn't already expired — a bad pair never replaces a working one. |
 
 **Why a restart, not `reload`.** The original design here (and `postfix.org`'s
 own general guidance) was that a `main.cf`/`master.cf` change only needs

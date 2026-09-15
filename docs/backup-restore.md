@@ -98,9 +98,15 @@ one, not a stale copy from before the rotation.
   restarts as long as its filesystem layer isn't discarded).
 - **`mail_log` history** is part of the database backup above like any
   other table — no separate step needed.
-- **TLS certificates** in the `postfix_tls` volume: back this up
-  separately if you've replaced the self-signed placeholder with a real
-  certificate (see [configuration.md](configuration.md)); a fresh
-  deployment regenerates the placeholder automatically, so it's not part
-  of the disaster-recovery-critical set the way the database and
-  encryption key are.
+- **TLS certificates** in the `postfix_tls` volume: if you've provisioned
+  a Let's Encrypt certificate from Settings → TLS Certificate (see
+  [configuration.md](configuration.md#tls-certificates)), the certificate
+  and its private key are also stored encrypted in the database — the
+  volume itself no longer needs a separate backup, since an app-startup
+  check re-populates it from the database automatically if it's ever lost
+  or the `postfix` container is recreated. If you've instead mounted a
+  real certificate from another CA directly, back that up separately, the
+  same as before this feature existed. A fresh deployment on neither path
+  just regenerates the self-signed placeholder automatically, so that
+  default case is still not part of the disaster-recovery-critical set
+  the way the database and encryption key are.
