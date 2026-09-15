@@ -38,6 +38,13 @@ class RelaySettings(Base):
     notify_on_upstream_test_failure: Mapped[bool] = mapped_column(nullable=False, default=True)
     notify_on_app_update_available: Mapped[bool] = mapped_column(nullable=False, default=True)
     notify_on_postfix_update_available: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # None = keep forever (today's behavior) — same "opt-in, never
+    # silently start doing something new" convention as
+    # connection_test_interval_minutes above; an upgrade must not start
+    # deleting existing rows until an admin explicitly sets a retention
+    # window (core/retention.py).
+    mail_log_retention_days: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    audit_log_retention_days: Mapped[int | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 
@@ -55,6 +62,7 @@ class BackgroundJobState(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     connection_test_last_run_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     update_check_last_run_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
+    retention_cleanup_last_run_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     latest_app_version: Mapped[str | None] = mapped_column(nullable=True, default=None)
     latest_app_version_checked_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     latest_postfix_version: Mapped[str | None] = mapped_column(nullable=True, default=None)

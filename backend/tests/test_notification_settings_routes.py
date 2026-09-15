@@ -43,6 +43,8 @@ def test_get_returns_defaults_on_a_fresh_install(admin_client: TestClient) -> No
     assert body["notify_sender_id"] is None
     assert body["notify_from_name"] is None
     assert body["notify_on_health_degraded"] is True
+    assert body["mail_log_retention_days"] is None
+    assert body["audit_log_retention_days"] is None
 
 
 def test_patch_can_set_and_clear_the_from_name(admin_client: TestClient) -> None:
@@ -87,6 +89,25 @@ def test_patch_can_explicitly_clear_the_interval_back_to_disabled(admin_client: 
         headers=csrf_headers(admin_client),
     )
     assert response.json()["connection_test_interval_minutes"] is None
+
+
+def test_patch_can_set_and_clear_retention_windows(admin_client: TestClient) -> None:
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"mail_log_retention_days": 30, "audit_log_retention_days": 90},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.json()["mail_log_retention_days"] == 30
+    assert response.json()["audit_log_retention_days"] == 90
+
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"mail_log_retention_days": None},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.json()["mail_log_retention_days"] is None
+    # Untouched — clearing one retention window must not affect the other.
+    assert response.json()["audit_log_retention_days"] == 90
 
 
 def test_patch_rejects_invalid_email_addresses(admin_client: TestClient) -> None:

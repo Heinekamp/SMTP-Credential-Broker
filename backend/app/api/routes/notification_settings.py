@@ -24,6 +24,8 @@ def _to_read(settings_row) -> NotificationSettingsRead:
         notify_on_upstream_test_failure=settings_row.notify_on_upstream_test_failure,
         notify_on_app_update_available=settings_row.notify_on_app_update_available,
         notify_on_postfix_update_available=settings_row.notify_on_postfix_update_available,
+        mail_log_retention_days=settings_row.mail_log_retention_days,
+        audit_log_retention_days=settings_row.audit_log_retention_days,
     )
 
 

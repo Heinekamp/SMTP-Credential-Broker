@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.core.alert_email import alert_email_tick
 from app.core.logging_config import configure_logging
 from app.core.request_context import set_request_id
+from app.core.retention import retention_cleanup_tick
 from app.core.scheduled_tests import connection_test_tick
 from app.core.scheduler import run_periodic
 from app.core.update_check import update_check_tick
@@ -48,6 +49,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             asyncio.create_task(run_periodic("connection_test", _POLL_SECONDS, connection_test_tick)),
             asyncio.create_task(run_periodic("update_check", _POLL_SECONDS, update_check_tick)),
             asyncio.create_task(run_periodic("alert_email", _POLL_SECONDS, alert_email_tick)),
+            asyncio.create_task(run_periodic("retention_cleanup", _POLL_SECONDS, retention_cleanup_tick)),
         ]
     yield
     for task in tasks:

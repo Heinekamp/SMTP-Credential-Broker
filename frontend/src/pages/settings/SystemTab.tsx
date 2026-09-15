@@ -1,13 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Card, StatusBadge } from "../../design-system/components";
+import { Button, Card, Select, StatusBadge } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ApiError } from "../../lib/apiClient";
 import { parseApiDate } from "../../lib/apiDate";
 import { generateConfig, listConfigGenerations } from "../../lib/api/config";
 import { fetchHealth } from "../../lib/api/health";
+import { fetchNotificationSettings, updateNotificationSettings } from "../../lib/api/notificationSettings";
 import { fetchSystemStatus } from "../../lib/api/system";
+
+const RETENTION_OPTIONS: { label: string; value: string }[] = [
+  { label: "Keep forever", value: "" },
+  { label: "30 days", value: "30" },
+  { label: "90 days", value: "90" },
+  { label: "365 days", value: "365" },
+];
 
 // Design handoff §10's System tab. Rotate Key stays a disabled control
 // permanently, not a deferred one: security-model.md §2 makes
@@ -35,6 +43,32 @@ export function SystemTab() {
           ? "Postfix's control surface is unreachable — check that the postfix container is running."
           : "Config generation failed — see the history below for details.",
       );
+    },
+  });
+
+  const { data: notificationSettings } = useQuery({
+    queryKey: ["notification-settings"],
+    queryFn: fetchNotificationSettings,
+  });
+  const [mailLogRetention, setMailLogRetention] = useState("");
+  const [auditLogRetention, setAuditLogRetention] = useState("");
+  const [retentionSaved, setRetentionSaved] = useState(false);
+
+  useEffect(() => {
+    if (!notificationSettings) return;
+    setMailLogRetention(notificationSettings.mail_log_retention_days?.toString() ?? "");
+    setAuditLogRetention(notificationSettings.audit_log_retention_days?.toString() ?? "");
+  }, [notificationSettings]);
+
+  const saveRetention = useMutation({
+    mutationFn: () =>
+      updateNotificationSettings({
+        mail_log_retention_days: mailLogRetention === "" ? null : Number(mailLogRetention),
+        audit_log_retention_days: auditLogRetention === "" ? null : Number(auditLogRetention),
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["notification-settings"], data);
+      setRetentionSaved(true);
     },
   });
 
@@ -161,6 +195,55 @@ export function SystemTab() {
               ))}
             </tbody>
           </table>
+        )}
+      </Card>
+
+      <Card title="Data Retention">
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
+          Automatically deletes old Mail Log and Audit Log entries. Off by default — nothing is ever deleted
+          until you set a window here.
+        </p>
+        <div style={fieldLabelStyle}>Mail Log</div>
+        <Select
+          value={mailLogRetention}
+          onChange={(e) => setMailLogRetention(e.target.value)}
+          style={{ width: "100%", marginBottom: 12 }}
+        >
+          {RETENTION_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+        <div style={fieldLabelStyle}>Audit Log</div>
+        <Select
+          value={auditLogRetention}
+          onChange={(e) => setAuditLogRetention(e.target.value)}
+          style={{ width: "100%", marginBottom: 16 }}
+        >
+          {RETENTION_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+        <Button
+          variant="accent"
+          onClick={() => {
+            setRetentionSaved(false);
+            saveRetention.mutate();
+          }}
+          disabled={saveRetention.isPending}
+        >
+          {saveRetention.isPending ? "Saving…" : "Save"}
+        </Button>
+        {retentionSaved && !saveRetention.isPending && (
+          <span style={{ marginLeft: 10, color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>Saved.</span>
+        )}
+        {saveRetention.isError && (
+          <span style={{ marginLeft: 10, color: "var(--status-fault)", fontSize: "var(--text-sm)" }}>
+            Could not save.
+          </span>
         )}
       </Card>
     </div>

@@ -10,6 +10,8 @@ export interface NotificationSettings {
   notify_on_upstream_test_failure: boolean;
   notify_on_app_update_available: boolean;
   notify_on_postfix_update_available: boolean;
+  mail_log_retention_days: number | null;
+  audit_log_retention_days: number | null;
 }
 
 export type NotificationSettingsUpdate = Partial<NotificationSettings>;

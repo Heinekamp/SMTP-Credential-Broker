@@ -11,6 +11,8 @@ class NotificationSettingsRead(BaseModel):
     notify_on_upstream_test_failure: bool
     notify_on_app_update_available: bool
     notify_on_postfix_update_available: bool
+    mail_log_retention_days: int | None
+    audit_log_retention_days: int | None
 
 
 class NotificationSettingsUpdate(BaseModel):
@@ -26,6 +28,8 @@ class NotificationSettingsUpdate(BaseModel):
     notify_on_upstream_test_failure: bool | None = None
     notify_on_app_update_available: bool | None = None
     notify_on_postfix_update_available: bool | None = None
+    mail_log_retention_days: int | None = None
+    audit_log_retention_days: int | None = None
 
 
 class TestAlertResponse(BaseModel):
