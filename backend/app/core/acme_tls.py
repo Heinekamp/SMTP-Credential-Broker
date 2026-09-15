@@ -30,7 +30,7 @@ from app.core.dns_provider import DnsProvider
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret, encrypt_secret
 from app.core.logging_config import get_logger
 from app.core.postfix_control import PostfixControlError
-from app.core.settings_store import get_relay_settings, get_tls_certificate_state
+from app.core.settings_store import get_background_job_state, get_relay_settings, get_tls_certificate_state
 
 _logger = get_logger("acme_tls")
 
@@ -232,6 +232,15 @@ def issue_or_renew(db: Session, *, issuer: AcmeIssuer | None = None) -> Certific
     state.issued_at = utcnow()
     state.acme_account_key_encrypted = encrypt_secret(account_key_pem)
     state.acme_account_uri = account_uri
+
+    # Clears a previously-recorded failure regardless of whether this
+    # success came from the background tick or a manual "Issue/Renew
+    # Now" click — a resolved problem must not keep showing as if it's
+    # still broken just because the manual path doesn't otherwise touch
+    # BackgroundJobState (issue #56's follow-up: the fix landed, but the
+    # stale error from before it stayed on screen next to a freshly
+    # issued, working certificate).
+    get_background_job_state(db).cert_last_renewal_error = None
 
     return CertificateIssuanceResult(success=True, detail="Issued.", not_after=issued.not_after)
 

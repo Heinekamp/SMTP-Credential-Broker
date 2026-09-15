@@ -11,7 +11,7 @@ from app.core import acme_tls
 from app.core.cloudflare_dns import CloudflareDnsProvider
 from app.core.encryption import EncryptionKeyNotConfigured, decrypt_secret, encrypt_secret
 from app.core.postfix_control import InstallTlsCertificateResult, PostfixControlError
-from app.core.settings_store import get_relay_settings, get_tls_certificate_state
+from app.core.settings_store import get_background_job_state, get_relay_settings, get_tls_certificate_state
 
 
 class _FakeIssuer:
@@ -116,6 +116,29 @@ def test_issue_or_renew_success_persists_state(monkeypatch: pytest.MonkeyPatch, 
     assert isinstance(passed_provider, CloudflareDnsProvider)
     assert passed_provider.api_token == "cf-token"
     assert passed_provider.zone_id == "Z123"
+
+
+def test_issue_or_renew_success_clears_a_previously_recorded_renewal_error(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Regression test: a manual "Issue/Renew Now" success must clear a
+    stale error left over from an earlier failed attempt (e.g. the
+    background tick's own last failure, before a bug fix landed) — a
+    resolved problem must not keep showing as if it's still broken next
+    to a freshly issued, working certificate."""
+    _configure(db_session)
+    get_background_job_state(db_session).cert_last_renewal_error = "stale error from before the fix"
+    db_session.commit()
+    monkeypatch.setattr(
+        acme_tls.postfix_control,
+        "install_tls_certificate",
+        lambda **kwargs: InstallTlsCertificateResult(success=True, detail="Installed.", restarted=True),
+    )
+
+    result = acme_tls.issue_or_renew(db_session, issuer=_FakeIssuer())
+
+    assert result.success is True
+    assert get_background_job_state(db_session).cert_last_renewal_error is None
 
 
 def test_issue_or_renew_reuses_the_existing_acme_account(monkeypatch: pytest.MonkeyPatch, db_session: Session) -> None:
