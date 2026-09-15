@@ -22,6 +22,7 @@ from app.api.routes import (
     queue,
     senders,
     system,
+    tls_settings,
     upstream_accounts,
 )
 from app.config import get_settings
@@ -107,6 +108,7 @@ app.include_router(admins.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(notification_settings.router, prefix="/api")
+app.include_router(tls_settings.router, prefix="/api")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
