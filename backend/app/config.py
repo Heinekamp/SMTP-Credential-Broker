@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # spin up real periodic tasks against a schema-less in-memory DB.
     scheduler_enabled: bool = True
 
+    # Deliberately a deploy-time env var, not a RelaySettings DB field an
+    # admin could toggle from the UI — a UI toggle risks a production
+    # relay being silently left pinned to Let's Encrypt's staging
+    # directory (untrusted certs). Override only for manual verification
+    # against staging (core/acme_tls.py).
+    acme_directory_url: str = "https://acme-v02.api.letsencrypt.org/directory"
+
 
 @lru_cache
 def get_settings() -> Settings:
