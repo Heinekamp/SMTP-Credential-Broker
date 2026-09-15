@@ -212,7 +212,7 @@ def test_tail_maillog_success(control_socket) -> None:
     response = {"ok": True, "lines": ["line one", "line two"], "new_offset": 42, "truncated": False}
     control_socket(lambda req: (received.append(req), response)[1])
     result = tail_maillog(17)
-    assert received == [{"op": "tail_maillog", "since_offset": 17}]
+    assert received == [{"op": "tail_maillog", "since_offset": 17, "since_inode": None}]
     assert result.lines == ["line one", "line two"]
     assert result.new_offset == 42
     assert result.truncated is False

@@ -146,10 +146,18 @@ def test_tail_maillog_detects_rotation_via_inode_even_when_the_new_file_is_alrea
     old_inode = control_surface._tail_maillog({"since_offset": 0, "since_inode": None})["inode"]
     old_offset = len("old file content, this is the previous log\n")
 
-    # Simulate logrotate's rename+create: the old file goes away, a brand
-    # new one appears at the same path, and — during the window before
-    # the next poll — already grows past the old byte offset.
-    maillog.unlink()
+    # Simulate logrotate's actual rename+create (not unlink+create): the
+    # old file is renamed aside — still alive under its new name, so its
+    # inode can't be handed back out — and a brand new file is created at
+    # the original path, which is what guarantees a fresh inode. Deleting
+    # the file first (unlink) instead of renaming it would free its inode
+    # immediately, and a filesystem is free to reuse that exact number for
+    # the very next file created there — which is exactly what happened
+    # under the original version of this test (flaky/wrong on Linux CI:
+    # https://github.com/Heinekamp/SMTP-Manager/issues/31 was correctly
+    # fixed, but this test's own simulation of rotation was not
+    # equivalent to what it claimed to simulate).
+    maillog.rename(tmp_path / "maillog.1")
     maillog.write_text("x" * (old_offset + 500) + "\nnew log line\n", encoding="utf-8")
 
     result = control_surface._tail_maillog({"since_offset": old_offset, "since_inode": old_inode})
