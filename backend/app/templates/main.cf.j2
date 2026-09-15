@@ -61,6 +61,12 @@ smtp_tls_loglevel = 1
 # ── Upstream selection / sender-dependent authentication ────────────
 smtp_sender_dependent_authentication = yes
 sender_dependent_relayhost_maps = lmdb:/etc/postfix/relay/sender_relayhost
+# Routes senders with an implicit-TLS (wrapped, e.g. port 465) upstream
+# account through the wrappermode-enabled transport clone in master.cf
+# instead of the default `smtp` transport — see that file's comment.
+# Senders absent from this map (the STARTTLS-mode majority) fall
+# through to the default transport unaffected.
+sender_dependent_default_transport_maps = lmdb:/etc/postfix/relay/sender_transport
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = lmdb:/etc/postfix/relay/sasl_passwd
 smtp_sasl_security_options = noanonymous

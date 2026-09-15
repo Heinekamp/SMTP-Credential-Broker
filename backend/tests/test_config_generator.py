@@ -10,14 +10,22 @@ from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 
 
-def _upstream(db: Session, name: str, username: str, *, enabled: bool = True) -> UpstreamAccount:
+def _upstream(
+    db: Session,
+    name: str,
+    username: str,
+    *,
+    enabled: bool = True,
+    tls_mode: TlsMode = TlsMode.starttls,
+    port: int = 587,
+) -> UpstreamAccount:
     from app.core.encryption import encrypt_secret
 
     account = UpstreamAccount(
         name=name,
         host="smtp.strato.de",
-        port=587,
-        tls_mode=TlsMode.starttls,
+        port=port,
+        tls_mode=tls_mode,
         username=username,
         encrypted_password=encrypt_secret("upstream-secret"),
         enabled=enabled,
@@ -86,6 +94,9 @@ def test_build_maps_matches_the_worked_example(db_session: Session) -> None:
     assert "alerts@example.com\tserver@example.com:upstream-secret" in sasl_lines
     assert "server@example.com\tserver@example.com:upstream-secret" in sasl_lines
 
+    # All-STARTTLS example — no sender needs the wrappermode transport.
+    assert maps["sender_transport"] == ""
+
 
 def test_multiple_users_on_one_sender_are_comma_joined(db_session: Session) -> None:
     account = _upstream(db_session, "STRATO", "server@example.com")
@@ -106,9 +117,38 @@ def test_orphaned_sender_produces_a_warning_and_is_excluded(db_session: Session)
     maps, warnings = _build_maps(db_session)
     assert maps["sender_relayhost"] == ""
     assert maps["sasl_passwd"] == ""
+    assert maps["sender_transport"] == ""
     assert len(warnings) == 1
     assert "printer@example.com" in warnings[0]
     assert "disabled" in warnings[0]
+
+
+def test_implicit_tls_sender_gets_a_sender_transport_entry(db_session: Session) -> None:
+    """Regression test for issue #57: an implicit-TLS (e.g. port 465)
+    upstream account must route its sender through the wrappermode
+    transport, or real mail relay fails with "lost connection ... while
+    receiving the initial server greeting" even though Test Connection
+    (a different code path) reports success."""
+    account = _upstream(db_session, "STRATO implicit", "printer@example.com", tls_mode=TlsMode.implicit, port=465)
+    _sender(db_session, "printer@example.com", account)
+
+    maps, _ = _build_maps(db_session)
+
+    assert maps["sender_relayhost"].strip() == "printer@example.com\t[smtp.strato.de]:465"
+    assert maps["sender_transport"].strip() == "printer@example.com\tsmtp_implicit_tls:"
+
+
+def test_starttls_sender_is_absent_from_sender_transport_when_mixed_with_implicit(db_session: Session) -> None:
+    starttls_account = _upstream(db_session, "STRATO starttls", "noreply@example.com")
+    implicit_account = _upstream(
+        db_session, "STRATO implicit", "printer@example.com", tls_mode=TlsMode.implicit, port=465
+    )
+    _sender(db_session, "noreply@example.com", starttls_account)
+    _sender(db_session, "printer@example.com", implicit_account)
+
+    maps, _ = _build_maps(db_session)
+
+    assert maps["sender_transport"].strip() == "printer@example.com\tsmtp_implicit_tls:"
 
 
 def test_dry_run_never_calls_the_control_surface(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

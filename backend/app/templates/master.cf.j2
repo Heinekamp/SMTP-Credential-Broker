@@ -41,6 +41,21 @@ proxywrite unix -       -       n       -       1       proxymap
 smtp      unix  -       -       n       -       -       smtp
 relay     unix  -       -       n       -       -       smtp
   -o syslog_name=postfix/$service_name
+{#- Implicit-TLS (wrapped) upstream accounts, e.g. port 465, need
+   smtp_tls_wrappermode — Postfix can only set that per-transport, not
+   per-destination, so senders using an implicit-TLS upstream account
+   are routed here instead of the default `smtp` transport via
+   sender_dependent_default_transport_maps (main.cf.j2), with the
+   nexthop left empty there so it still resolves through
+   sender_relayhost like every other sender. Discovered broken in a
+   real deployment: without this, Postfix waits for a plaintext
+   greeting on a port that immediately expects a TLS ClientHello,
+   failing with "lost connection ... while receiving the initial
+   server greeting" (postfix-architecture.md §4). #}
+smtp_implicit_tls unix  -       -       n       -       -       smtp
+  -o syslog_name=postfix/$service_name
+  -o smtp_tls_wrappermode=yes
+  -o smtp_tls_security_level=encrypt
 showq     unix  n       -       n       -       -       showq
 error     unix  -       -       n       -       -       error
 retry     unix  -       -       n       -       -       error

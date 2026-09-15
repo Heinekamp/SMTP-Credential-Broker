@@ -11,7 +11,7 @@ from app.core.clock import utcnow
 from app.core.encryption import decrypt_secret
 from app.core.permissions import enabled_senders_with_upstream, sender_login_map
 from app.models.config_generation import ConfigGeneration
-from app.models.enums import ValidationResult
+from app.models.enums import TlsMode, ValidationResult
 from app.models.sender import Sender
 
 _ENV = jinja2.Environment(
@@ -27,7 +27,7 @@ def _tab_join(*fields: str) -> str:
 
 
 def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
-    """Renders the three lookup-map source files
+    """Renders the four lookup-map source files
     (postfix-architecture.md §4) plus a list of human-readable warnings for
     senders that can't currently produce a working map entry (e.g. their
     upstream account is disabled) — an invariant worth surfacing, not
@@ -41,11 +41,21 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
 
     relayhost_lines: list[str] = []
     sasl_passwd_lines: list[str] = []
+    # Only implicit-TLS (wrapped, e.g. port 465) senders need an entry
+    # here — everyone else falls through to the default `smtp` transport
+    # via master.cf.j2's sender_dependent_default_transport_maps comment.
+    sender_transport_lines: list[str] = []
     for sender in enabled_senders_with_upstream(db):
         account = sender.upstream_account
         relayhost_lines.append(_tab_join(sender.address, f"[{account.host}]:{account.port}"))
         password = decrypt_secret(account.encrypted_password)
         sasl_passwd_lines.append(_tab_join(sender.address, f"{account.username}:{password}"))
+        if account.tls_mode is TlsMode.implicit:
+            # Empty nexthop after the colon — Postfix still resolves the
+            # actual host:port via sender_dependent_relayhost_maps above,
+            # this only selects which transport (and therefore whether
+            # smtp_tls_wrappermode applies) handles the sender.
+            sender_transport_lines.append(_tab_join(sender.address, "smtp_implicit_tls:"))
 
     all_senders = db.execute(select(Sender)).scalars().all()
     working_addresses = {s.address for s in enabled_senders_with_upstream(db)}
@@ -62,6 +72,7 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
         "sender_login": "\n".join(sender_login_lines) + ("\n" if sender_login_lines else ""),
         "sender_relayhost": "\n".join(relayhost_lines) + ("\n" if relayhost_lines else ""),
         "sasl_passwd": "\n".join(sasl_passwd_lines) + ("\n" if sasl_passwd_lines else ""),
+        "sender_transport": "\n".join(sender_transport_lines) + ("\n" if sender_transport_lines else ""),
     }
     return maps, warnings
 

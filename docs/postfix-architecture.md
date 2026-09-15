@@ -266,6 +266,24 @@ addresses the local `monitoring` user is allowed to use. This is the generic
 model's answer to "an address is really just an alias of a mailbox I already
 pay for."
 
+`/etc/postfix/relay/sender_transport`:
+
+```text
+printer@example.com    smtp_implicit_tls:
+```
+
+Only senders whose upstream account uses **implicit** TLS (a wrapped port
+like 465, as opposed to STARTTLS on 587) get an entry here — the empty
+nexthop after the colon means "use this transport, but still resolve the
+actual host:port from `sender_relayhost` above like everyone else." This
+routes them through the wrappermode-enabled `smtp_implicit_tls` transport
+clone in `master.cf` (§3) instead of the default `smtp` transport, which
+never sets `smtp_tls_wrappermode` and would otherwise fail against a
+wrapped port with "lost connection ... while receiving the initial server
+greeting" — Postfix waiting for a plaintext greeting a wrapped-TLS server
+will never send. STARTTLS senders are simply absent from this map and fall
+through to the default transport unaffected.
+
 Each source file is converted with `postmap lmdb:/etc/postfix/relay/<name>`
 into `<name>.lmdb`, which is what the running `main.cf` directives actually
 reference (`lmdb:/etc/postfix/relay/<name>`, no `.lmdb` suffix needed —
@@ -339,7 +357,7 @@ authenticates with its own local SMTP user and is bound by that user's
 | Change | What's regenerated | Apply step |
 |---|---|---|
 | Add/edit/disable a sender's permissions | `sender_login` source + `.lmdb` | **None.** Postfix's `smtpd(8)` processes re-read a lookup table automatically once its file's mtime/inode changes; no `reload` or restart needed. |
-| Add/edit an upstream account or change which upstream a sender uses | `sender_relayhost` + `sasl_passwd` sources + `.lmdb`s | **None**, same reason. |
+| Add/edit an upstream account or change which upstream a sender uses | `sender_relayhost` + `sasl_passwd` + `sender_transport` sources + `.lmdb`s | **None**, same reason. |
 | Rotate an upstream account's password | `sasl_passwd` source + `.lmdb` only | **None.** `sender_login` and `sender_relayhost` are untouched — this is why credential rotation never affects local users' credentials (spec §25's rotation test). |
 | Add/remove a local SMTP user | `sasldb2` entry (via `saslpasswd2`) + `sender_login` (if permissions changed too) | **None** for `sasldb2` — the SASL library reads it per-authentication-attempt, not cached at process start. |
 | Change `myhostname` or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix stop` + `postfix start` — see the note below on why this is a restart, not `postfix reload`. |
