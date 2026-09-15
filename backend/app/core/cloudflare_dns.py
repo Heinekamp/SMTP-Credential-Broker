@@ -11,6 +11,8 @@ real benefit."""
 
 import time
 
+import dns.exception
+import dns.resolver
 import requests
 
 from app.core.logging_config import get_logger
@@ -88,6 +90,7 @@ class CloudflareDnsProvider:
 
     def create_txt_record(self, domain: str, name: str, value: str) -> str:
         zone_id = self._resolve_zone_id(domain)
+        _logger.info("creating TXT record: zone=%s requested_name=%s value=%s", zone_id, name, value)
         try:
             response = requests.post(
                 f"{_API_BASE}/zones/{zone_id}/dns_records",
@@ -101,7 +104,21 @@ class CloudflareDnsProvider:
         body = response.json() if response.content else {}
         if not response.ok or not body.get("success"):
             raise CloudflareApiError(f"Failed to create TXT record: {body.get('errors', response.text[:200])}")
-        return body["result"]["id"]
+        result = body["result"]
+        # Log exactly what Cloudflare says it stored — a diagnostic for a
+        # real-world case (#56) where Cloudflare's API confirmed a record
+        # existed but the zone's own authoritative nameservers never
+        # served it; comparing the requested vs. stored name/zone here is
+        # the fastest way to catch any silent transformation Cloudflare's
+        # API applies (e.g. an unexpected zone suffix).
+        _logger.info(
+            "created TXT record: id=%s stored_name=%s stored_zone_id=%s stored_content=%s",
+            result.get("id"),
+            result.get("name"),
+            result.get("zone_id"),
+            result.get("content"),
+        )
+        return result["id"]
 
     def delete_txt_record(self, domain: str, record_id: str) -> None:
         try:
@@ -115,36 +132,58 @@ class CloudflareDnsProvider:
             _logger.warning("failed to clean up ACME challenge TXT record %s", record_id, exc_info=True)
 
     def wait_for_propagation(self, name: str, value: str, timeout_seconds: float = 60.0) -> bool:
-        """Polls Cloudflare's own (authoritative) API for the record's
-        existence rather than doing real DNS resolution — Cloudflare's API
-        reflects a just-created record immediately in the overwhelming
-        majority of cases, and avoiding a real DNS-resolution dependency
-        (e.g. dnspython) here keeps this feature's footprint small. Let's
-        Encrypt's own validation retries independently on top of this."""
+        """Queries the domain's real authoritative nameservers directly —
+        not Cloudflare's management API. Confirmed in production (issue
+        #56) that the two can briefly disagree: Cloudflare's API is
+        instantly self-consistent with itself once a record is created,
+        but its actual DNS-serving edge network can lag a few seconds
+        behind — long enough that answering the ACME challenge as soon
+        as the API confirms the record can still result in Let's
+        Encrypt's own validation (which queries real DNS) finding
+        nothing. Only once at least one authoritative nameserver
+        genuinely serves the expected value is the challenge answered."""
         deadline = time.monotonic() + timeout_seconds
-        try:
-            # _resolve_zone_id already peels labels off whatever domain-like
-            # string it's given until one matches a real zone, so passing
-            # the full challenge name (e.g. "_acme-challenge.sub.example.com")
-            # resolves to the same zone create_txt_record used, without
-            # needing to know how many labels belong to the actual domain.
-            zone_id = self._resolve_zone_id(name)
-        except CloudflareApiError:
+        nameservers = self._authoritative_nameservers(name)
+        if not nameservers:
+            _logger.warning("wait_for_propagation: could not resolve authoritative nameservers for %s", name)
             return False
 
+        attempt = 0
         while time.monotonic() < deadline:
-            try:
-                response = requests.get(
-                    f"{_API_BASE}/zones/{zone_id}/dns_records",
-                    headers=self._headers(),
-                    params={"type": "TXT", "name": name},
-                    timeout=self.timeout,
-                )
-                if response.ok:
-                    records = response.json().get("result") or []
-                    if any(record.get("content") == value for record in records):
-                        return True
-            except requests.RequestException:
-                pass
+            attempt += 1
+            if self._txt_record_visible_at(nameservers, name, value):
+                _logger.info("wait_for_propagation: %s visible on attempt %d via %s", name, attempt, nameservers)
+                return True
             time.sleep(2)
+        _logger.warning(
+            "wait_for_propagation: %s never became visible via %s within %.0fs", name, nameservers, timeout_seconds
+        )
+        return False
+
+    def _authoritative_nameservers(self, name: str) -> list[str]:
+        """Peels labels off `name` (the same technique _resolve_zone_id
+        uses) until an NS lookup succeeds, so this works whether given a
+        bare domain or a full challenge name like
+        "_acme-challenge.sub.example.com"."""
+        labels = name.split(".")
+        for i in range(len(labels) - 1):
+            candidate = ".".join(labels[i:])
+            try:
+                answer = dns.resolver.resolve(candidate, "NS", lifetime=self.timeout)
+            except dns.exception.DNSException:
+                continue
+            return [str(rdata.target).rstrip(".") for rdata in answer]
+        return []
+
+    @staticmethod
+    def _txt_record_visible_at(nameservers: list[str], name: str, value: str) -> bool:
+        for nameserver in nameservers:
+            try:
+                answer = dns.resolver.resolve_at(nameserver, name, "TXT", lifetime=5.0)
+            except dns.exception.DNSException:
+                continue
+            for rdata in answer:
+                content = b"".join(rdata.strings).decode("utf-8", errors="replace")
+                if content == value:
+                    return True
         return False

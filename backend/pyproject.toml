@@ -22,6 +22,7 @@ dependencies = [
     "pyotp>=2.9",
     "requests>=2.31",
     "acme>=2.9",
+    "dnspython>=2.6",
 ]
 
 [project.optional-dependencies]
