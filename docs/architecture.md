@@ -287,3 +287,7 @@ relay queue                     # lists the Postfix queue (wraps postqueue -j)
 - Confirm Cyrus SASL/sasldb2 is acceptable given the plaintext-equivalent
   secret tradeoff (see [security-model.md](security-model.md) §4) versus
   adding Dovecot as a fourth container.
+- Confirm the flat, single-role admin model (any authenticated admin can
+  create other admins and reach every route) is acceptable, or whether a
+  read-only "viewer" role is worth the cross-cutting authorization change it
+  would require. See [known-limitations.md](known-limitations.md) for detail.
