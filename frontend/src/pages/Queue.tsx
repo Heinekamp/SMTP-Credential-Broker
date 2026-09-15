@@ -4,8 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, StatusBadge } from "../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../design-system/table";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { ApiError } from "../lib/apiClient";
 import { relativeTime } from "../lib/relativeTime";
 import { deleteQueueMessage, listQueue, retryQueueMessage, type QueueEntry } from "../lib/api/queue";
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError && typeof err.detail === "string" ? err.detail : fallback;
+}
 
 const QUERY_KEY = ["queue"];
 
@@ -21,10 +26,14 @@ export function Queue() {
   const queryClient = useQueryClient();
   const { data: entries, isLoading, isError } = useQuery({ queryKey: QUERY_KEY, queryFn: listQueue });
   const [deleteTarget, setDeleteTarget] = useState<QueueEntry | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const retry = useMutation({
     mutationFn: (queueId: string) => retryQueueMessage(queueId),
+    onMutate: () => setRetryError(null),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onError: (err) => setRetryError(errorMessage(err, "Could not retry this message.")),
   });
 
   const remove = useMutation({
@@ -32,7 +41,9 @@ export function Queue() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setDeleteTarget(null);
+      setDeleteError(null);
     },
+    onError: (err) => setDeleteError(errorMessage(err, "Could not delete this message.")),
   });
 
   return (
@@ -52,6 +63,14 @@ export function Queue() {
           <p style={{ margin: 0, fontWeight: 600 }}>Couldn't load the queue.</p>
           <p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
             This is a connectivity/API issue, not a sign that there's nothing queued.
+          </p>
+        </Card>
+      )}
+
+      {retryError && (
+        <Card style={{ borderLeft: "3px solid var(--status-fault)", marginBottom: 12 }}>
+          <p role="alert" style={{ margin: 0, color: "var(--status-fault)" }}>
+            {retryError}
           </p>
         </Card>
       )}
@@ -92,7 +111,13 @@ export function Queue() {
                       <Button variant="default" onClick={() => retry.mutate(entry.queue_id)}>
                         Retry
                       </Button>
-                      <Button variant="danger" onClick={() => setDeleteTarget(entry)}>
+                      <Button
+                        variant="danger"
+                        onClick={() => {
+                          setDeleteTarget(entry);
+                          setDeleteError(null);
+                        }}
+                      >
                         Delete
                       </Button>
                     </div>
@@ -111,7 +136,11 @@ export function Queue() {
           confirmLabel="Delete"
           variant="danger"
           confirming={remove.isPending}
-          onCancel={() => setDeleteTarget(null)}
+          error={deleteError}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }}
           onConfirm={() => remove.mutate(deleteTarget.queue_id)}
         />
       )}

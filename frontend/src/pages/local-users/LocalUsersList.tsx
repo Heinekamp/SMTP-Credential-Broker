@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { ApiError } from "../../lib/apiClient";
 import { relativeTime } from "../../lib/relativeTime";
 import {
   deleteLocalUser,
@@ -23,9 +24,16 @@ export function LocalUsersList() {
   const { data: users, isLoading, isError } = useQuery({ queryKey: QUERY_KEY, queryFn: listLocalUsers });
 
   const [disableTarget, setDisableTarget] = useState<LocalUser | null>(null);
+  const [disableError, setDisableError] = useState<string | null>(null);
   const [regenerateTarget, setRegenerateTarget] = useState<LocalUser | null>(null);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LocalUser | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  function errorMessage(err: unknown, fallback: string): string {
+    return err instanceof ApiError && typeof err.detail === "string" ? err.detail : fallback;
+  }
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateLocalUser(id, { enabled }),
@@ -37,6 +45,7 @@ export function LocalUsersList() {
         navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
       }
     },
+    onError: (err) => setDisableError(errorMessage(err, "Could not change this user's status.")),
   });
 
   const regenerate = useMutation({
@@ -46,6 +55,7 @@ export function LocalUsersList() {
       setRegenerateTarget(null);
       navigate(`/local-users/${id}/reveal`, { state: { password: result.password } });
     },
+    onError: (err) => setRegenerateError(errorMessage(err, "Could not regenerate this user's password.")),
   });
 
   const remove = useMutation({
@@ -54,13 +64,16 @@ export function LocalUsersList() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setDeleteTarget(null);
       setDeletePrecheck(null);
+      setDeleteError(null);
     },
+    onError: (err) => setDeleteError(errorMessage(err, "Could not delete this user.")),
   });
 
   async function openDeleteModal(user: LocalUser) {
     const precheck = await deleteLocalUserPrecheck(user.id);
     setDeleteTarget(user);
     setDeletePrecheck(precheck.allowed_sender_addresses);
+    setDeleteError(null);
   }
 
   return (
@@ -122,6 +135,7 @@ export function LocalUsersList() {
                   <Switch
                     checked={user.enabled}
                     onChange={(checked) => {
+                      setDisableError(null);
                       if (checked) {
                         toggleEnabled.mutate({ id: user.id, enabled: true });
                       } else {
@@ -150,7 +164,13 @@ export function LocalUsersList() {
                     <Button variant="default" onClick={() => navigate(`/local-users/${user.id}/connection-details`)}>
                       Connection Details
                     </Button>
-                    <Button variant="warn" onClick={() => setRegenerateTarget(user)}>
+                    <Button
+                      variant="warn"
+                      onClick={() => {
+                        setRegenerateTarget(user);
+                        setRegenerateError(null);
+                      }}
+                    >
                       Regenerate
                     </Button>
                     <Button variant="danger" onClick={() => openDeleteModal(user)}>
@@ -171,7 +191,11 @@ export function LocalUsersList() {
           confirmLabel="Disable"
           variant="danger"
           confirming={toggleEnabled.isPending}
-          onCancel={() => setDisableTarget(null)}
+          error={disableError}
+          onCancel={() => {
+            setDisableTarget(null);
+            setDisableError(null);
+          }}
           onConfirm={() => {
             toggleEnabled.mutate({ id: disableTarget.id, enabled: false }, { onSuccess: () => setDisableTarget(null) });
           }}
@@ -185,7 +209,11 @@ export function LocalUsersList() {
           confirmLabel="Regenerate"
           variant="warn"
           confirming={regenerate.isPending}
-          onCancel={() => setRegenerateTarget(null)}
+          error={regenerateError}
+          onCancel={() => {
+            setRegenerateTarget(null);
+            setRegenerateError(null);
+          }}
           onConfirm={() => regenerate.mutate(regenerateTarget.id)}
         />
       )}
@@ -201,9 +229,11 @@ export function LocalUsersList() {
           confirmLabel="Delete"
           variant="danger"
           confirming={remove.isPending}
+          error={deleteError}
           onCancel={() => {
             setDeleteTarget(null);
             setDeletePrecheck(null);
+            setDeleteError(null);
           }}
           onConfirm={() => remove.mutate(deleteTarget.id)}
         />

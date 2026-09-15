@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Checkbox } from "../../design-system/components";
+import { ApiError } from "../../lib/apiClient";
 import { getSenderPermissions, grantSenderPermission, revokeSenderPermission } from "../../lib/api/senders";
 
 // Design handoff §6's "Allowed local users" screen — its own screen, not a
@@ -15,13 +17,20 @@ export function SenderPermissions() {
 
   const queryKey = ["senders", senderId, "permissions"];
   const { data } = useQuery({ queryKey, queryFn: () => getSenderPermissions(senderId) });
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = useMutation({
     mutationFn: ({ localUserId, allowed }: { localUserId: number; allowed: boolean }) =>
       allowed ? grantSenderPermission(senderId, localUserId) : revokeSenderPermission(senderId, localUserId),
+    onMutate: () => setError(null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ["senders"] });
+    },
+    onError: (err) => {
+      // The checkbox is controlled by server data, so a failed toggle
+      // reverts on its own next render — this just explains why.
+      setError(err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not change this permission.");
     },
   });
 
@@ -33,6 +42,12 @@ export function SenderPermissions() {
       <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0, marginBottom: 16 }}>
         Allowed local users
       </p>
+
+      {error && (
+        <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginTop: 0 }}>
+          {error}
+        </p>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {(data?.local_users ?? []).map((user) => (

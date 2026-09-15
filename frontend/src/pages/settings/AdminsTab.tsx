@@ -28,12 +28,19 @@ export function AdminsTab() {
   const [changingOwnPassword, setChangingOwnPassword] = useState(false);
   const [enrollingTotp, setEnrollingTotp] = useState(false);
   const [removingTotp, setRemovingTotp] = useState(false);
+  const [removeTotpError, setRemoveTotpError] = useState<string | null>(null);
 
   const remove = useMutation({
     mutationFn: () => removeTotp(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setRemovingTotp(false);
+      setRemoveTotpError(null);
+    },
+    onError: (err) => {
+      setRemoveTotpError(
+        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not remove TOTP.",
+      );
     },
   });
 
@@ -133,7 +140,13 @@ export function AdminsTab() {
                   {admin.email === session?.email ? (
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                       {admin.totp_enabled ? (
-                        <Button variant="default" onClick={() => setRemovingTotp(true)}>
+                        <Button
+                          variant="default"
+                          onClick={() => {
+                            setRemovingTotp(true);
+                            setRemoveTotpError(null);
+                          }}
+                        >
                           Remove TOTP
                         </Button>
                       ) : (
@@ -176,7 +189,11 @@ export function AdminsTab() {
           confirmLabel="Remove"
           variant="danger"
           confirming={remove.isPending}
-          onCancel={() => setRemovingTotp(false)}
+          error={removeTotpError}
+          onCancel={() => {
+            setRemovingTotp(false);
+            setRemoveTotpError(null);
+          }}
           onConfirm={() => remove.mutate()}
         />
       )}
