@@ -4,8 +4,9 @@ import { Tabs } from "../../design-system/components";
 import { AdminsTab } from "./AdminsTab";
 import { NotificationsTab } from "./NotificationsTab";
 import { SystemTab } from "./SystemTab";
+import { TlsCertificateTab } from "./TlsCertificateTab";
 
-type SettingsTab = "admins" | "system" | "notifications";
+type SettingsTab = "admins" | "system" | "notifications" | "tls";
 
 // Design handoff §10.
 export function Settings() {
@@ -20,6 +21,7 @@ export function Settings() {
             { value: "admins", label: "Admins" },
             { value: "system", label: "System" },
             { value: "notifications", label: "Notifications" },
+            { value: "tls", label: "TLS Certificate" },
           ]}
           active={tab}
           onChange={(value) => setTab(value as SettingsTab)}
@@ -28,6 +30,7 @@ export function Settings() {
       {tab === "admins" && <AdminsTab />}
       {tab === "system" && <SystemTab />}
       {tab === "notifications" && <NotificationsTab />}
+      {tab === "tls" && <TlsCertificateTab />}
     </div>
   );
 }
