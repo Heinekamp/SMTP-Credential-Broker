@@ -1,0 +1,10 @@
+# Shell scripts and Dockerfiles must always have LF line endings,
+# regardless of the checking-out platform's core.autocrlf setting — a
+# CRLF shebang line makes the kernel's exec() fail with a misleading
+# "no such file or directory" the first time the container actually runs
+# the script (discovered deploying from a Windows checkout: `git archive`
+# honors the same line-ending conversion as checkout, so this bit even a
+# clean `git archive <tag>` export, not just a working-tree copy).
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
