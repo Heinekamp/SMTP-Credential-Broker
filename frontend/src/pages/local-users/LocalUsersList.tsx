@@ -80,9 +80,14 @@ export function LocalUsersList() {
     <div style={{ maxWidth: 1200 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h1 style={{ fontSize: "var(--text-lg)", fontWeight: 600, margin: 0 }}>Local SMTP Users</h1>
-        <Button variant="accent" onClick={() => navigate("/local-users/new")}>
-          + Add Local SMTP User
-        </Button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a href="/api/exports/local-users.csv" style={exportLinkStyle}>
+            Export CSV
+          </a>
+          <Button variant="accent" onClick={() => navigate("/local-users/new")}>
+            + Add Local SMTP User
+          </Button>
+        </div>
       </div>
 
       {isLoading && (
@@ -251,4 +256,22 @@ const linkButtonStyle = {
   fontSize: "var(--text-sm)",
   fontFamily: "var(--font-ui)",
   textDecoration: "underline",
+};
+
+// Same visual weight as Button's "default" variant — a plain <a> (not
+// Button, which only ever renders a <button>) so the browser handles the
+// download via the response's Content-Disposition header, cookies and
+// all, with no JS involved.
+const exportLinkStyle = {
+  padding: "8px 14px",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border-default)",
+  background: "var(--surface-control)",
+  color: "var(--text-body)",
+  cursor: "pointer",
+  fontSize: "var(--text-sm)",
+  fontFamily: "var(--font-ui)",
+  textDecoration: "none",
+  display: "inline-flex",
+  alignItems: "center",
 };
