@@ -16,7 +16,7 @@ export function Checkbox({ checked, onChange, disabled, style }: CheckboxProps) 
       checked={checked}
       onChange={onChange}
       disabled={disabled}
-      style={{ width: 16, height: 16, accentColor: "var(--brand-green)", ...style }}
+      style={{ width: 16, height: 16, accentColor: "var(--accent)", ...style }}
     />
   );
 }

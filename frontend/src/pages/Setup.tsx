@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
 import { submitSetup } from "../lib/api/setup";
 import { SESSION_QUERY_KEY } from "../lib/useSession";
@@ -53,7 +54,7 @@ export function Setup() {
     >
       <Card style={{ width: "100%", maxWidth: 420, padding: 32 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <img src="/logo.png" width={32} height={32} alt="" />
+          <BrandLogo width={32} height={32} />
           <span style={{ fontSize: "var(--text-md)", fontWeight: 600 }}>Create the first admin account</span>
         </div>
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0, marginBottom: 20 }}>

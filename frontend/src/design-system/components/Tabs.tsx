@@ -21,8 +21,8 @@ export function Tabs({ tabs, active, onChange }: TabsProps) {
             fontFamily: "var(--font-ui)",
             fontSize: "var(--text-sm)",
             cursor: "pointer",
-            background: active === t.value ? "var(--brand-green)" : "var(--surface-control)",
-            color: active === t.value ? "var(--brand-green-ink)" : "var(--text-body)",
+            background: active === t.value ? "var(--accent)" : "var(--surface-control)",
+            color: active === t.value ? "var(--text-on-accent)" : "var(--text-body)",
             fontWeight: active === t.value ? 600 : 400,
           }}
         >

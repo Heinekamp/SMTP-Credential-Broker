@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
 import { ApiError, login, type RateLimitDetail } from "../lib/apiClient";
 import { SESSION_QUERY_KEY } from "../lib/useSession";
@@ -80,7 +81,7 @@ export function Login() {
     >
       <Card style={{ width: "100%", maxWidth: 380, padding: 32 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-          <img src="/logo.png" width={32} height={32} alt="" />
+          <BrandLogo width={32} height={32} />
           <span style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>SMTP Relay Console</span>
         </div>
 

@@ -19,7 +19,7 @@ export function StatTile({ label, value }: StatTileProps) {
       }}
     >
       <span style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)" }}>{label}</span>
-      <span style={{ fontSize: "var(--text-lg)", fontWeight: 600, color: "var(--brand-green)" }}>{value}</span>
+      <span style={{ fontSize: "var(--text-lg)", fontWeight: 600, color: "var(--accent)" }}>{value}</span>
     </div>
   );
 }

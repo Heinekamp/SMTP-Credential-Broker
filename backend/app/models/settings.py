@@ -67,6 +67,13 @@ class RelaySettings(Base):
     notify_on_rate_limit_abuse: Mapped[bool] = mapped_column(nullable=False, default=False)
     rate_limit_abuse_auto_disable_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     rate_limit_abuse_threshold_minutes: Mapped[int] = mapped_column(nullable=False, default=10)
+    # Visual customization (#51). None everywhere below means "use the
+    # bundled default" — same nullable-means-default convention as the
+    # rest of this table, so an upgrade never changes how an existing
+    # deployment looks. accent_color is a "#rrggbb" hex string.
+    accent_color: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    logo_image: Mapped[bytes | None] = mapped_column(nullable=True, default=None)
+    logo_content_type: Mapped[str | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 

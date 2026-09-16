@@ -210,6 +210,8 @@ references a live `senders` row, which an env var can't express.
 | `notify_on_rate_limit_abuse` | boolean, not null, default **false** | Same shape as the four above, but default off — a new automated-behavior category should not silently start emailing on upgrade the way the older baseline-monitoring kinds already did (postfix-architecture.md §10). |
 | `rate_limit_abuse_auto_disable_enabled` | boolean, not null, default false | Opt-in escalation: `core/rate_limit_abuse.py`'s tick disables a still-enabled flagged user outright, independent of the email toggle above. |
 | `rate_limit_abuse_threshold_minutes` | integer, not null, default 10 | How long a local user's unbroken defer streak must run before it's surfaced at all — always consulted for the notification-bell alert, regardless of the two toggles above. |
+| `accent_color` | text, nullable | Visual customization (#51/#53). `NULL` = the bundled default green — same nullable-means-default convention as everything else in this table. A `"#rrggbb"` hex string otherwise, applied via `--accent`/`--text-on-accent` CSS custom properties on the frontend. |
+| `logo_image` / `logo_content_type` | blob / text, both nullable | An uploaded custom logo (issue #54), replacing the default wordmark/icon and doubling as the browser favicon (issue #55). `NULL` means no custom logo — stored in the DB rather than on disk, same reasoning as the TLS certificate material below. |
 | `updated_at` | timestamp, not null | |
 
 ## 11. `background_job_state`

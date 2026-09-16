@@ -370,7 +370,7 @@ const linkButtonStyle = {
   background: "none",
   border: "none",
   padding: 0,
-  color: "var(--brand-green)",
+  color: "var(--accent)",
   cursor: "pointer",
   fontSize: "var(--text-sm)",
   fontFamily: "var(--font-ui)",

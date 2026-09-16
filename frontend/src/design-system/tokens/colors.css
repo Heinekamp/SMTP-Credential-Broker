@@ -49,3 +49,32 @@
   --text-on-accent: var(--brand-green-ink);
   --accent: var(--brand-green);
 }
+
+/* Light theme (#52) — a neutral-scale inversion only. Brand/status/
+   feedback colors are untouched: they already read fine on a white
+   surface, so this isn't a full brand re-derivation, just the
+   dark-vs-light half of the palette. Applied either by following the
+   OS preference (no explicit choice made) or by an explicit
+   data-theme="light" attribute set by lib/theme.ts, which always wins
+   over the media query. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --n-bg: #f4f5f7;
+    --n-surface: #ffffff;
+    --n-surface-sunken: #e9ebef;
+    --n-surface-raised: #e2e4e9;
+    --n-border: #d4d7de;
+    --n-text: #1a1f2b;
+    --n-text-muted: #5b6472;
+  }
+}
+
+:root[data-theme="light"] {
+  --n-bg: #f4f5f7;
+  --n-surface: #ffffff;
+  --n-surface-sunken: #e9ebef;
+  --n-surface-raised: #e2e4e9;
+  --n-border: #d4d7de;
+  --n-text: #1a1f2b;
+  --n-text-muted: #5b6472;
+}

@@ -43,8 +43,8 @@ export function Sidenav() {
           end={item.to === "/"}
           style={({ isActive }) => ({
             background: isActive ? "rgba(114,191,68,0.08)" : "none",
-            borderLeft: isActive ? "3px solid var(--brand-green)" : "3px solid transparent",
-            color: isActive ? "var(--brand-green)" : "var(--text-muted)",
+            borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
+            color: isActive ? "var(--accent)" : "var(--text-muted)",
             textDecoration: "none",
             padding: "12px 20px",
             cursor: "pointer",

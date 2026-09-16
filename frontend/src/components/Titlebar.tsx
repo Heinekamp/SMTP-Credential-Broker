@@ -5,9 +5,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Icon, StatusBadge } from "../design-system/components";
 import { logout } from "../lib/apiClient";
 import { fetchHealth } from "../lib/api/health";
+import { type ThemeChoice, useTheme } from "../lib/theme";
 import { SESSION_QUERY_KEY, useSession } from "../lib/useSession";
+import { BrandLogo } from "./BrandLogo";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { NotificationBell } from "./NotificationBell";
+
+const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "System" },
+];
 
 // Design handoff §3/"Notable Deviations": a custom title bar matching the
 // base Titlebar component's exact visual spec (56px, surface-card, 1px
@@ -19,6 +27,7 @@ export function Titlebar() {
   const queryClient = useQueryClient();
   const { data: session } = useSession();
   const { data: health } = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 30_000 });
+  const { theme, setTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
@@ -45,7 +54,7 @@ export function Titlebar() {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
-        <img src="/logo.png" alt="" style={{ height: 28, width: 28, objectFit: "contain" }} />
+        <BrandLogo height={28} width={28} />
         SMTP Relay Console
       </div>
 
@@ -102,6 +111,41 @@ export function Titlebar() {
                 zIndex: 50,
               }}
             >
+              <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border-default)" }}>
+                <div
+                  style={{
+                    fontSize: "var(--text-2xs)",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "var(--tracking-label)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Appearance
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {THEME_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setTheme(opt.value)}
+                      style={{
+                        flex: 1,
+                        padding: "4px 0",
+                        fontSize: "var(--text-2xs)",
+                        fontFamily: "var(--font-ui)",
+                        borderRadius: "var(--radius-sm)",
+                        border: "1px solid var(--border-default)",
+                        cursor: "pointer",
+                        background: theme === opt.value ? "var(--accent)" : "var(--surface-control)",
+                        color: theme === opt.value ? "var(--text-on-accent)" : "var(--text-body)",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => {

@@ -116,7 +116,7 @@ export function NotificationBell() {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "var(--brand-green)",
+                      color: "var(--accent)",
                       fontSize: "var(--text-2xs)",
                       cursor: "pointer",
                       padding: 0,

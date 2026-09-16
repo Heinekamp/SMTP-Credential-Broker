@@ -2,11 +2,12 @@ import { useState } from "react";
 
 import { Tabs } from "../../design-system/components";
 import { AdminsTab } from "./AdminsTab";
+import { AppearanceTab } from "./AppearanceTab";
 import { NotificationsTab } from "./NotificationsTab";
 import { SystemTab } from "./SystemTab";
 import { TlsCertificateTab } from "./TlsCertificateTab";
 
-type SettingsTab = "admins" | "system" | "notifications" | "tls";
+type SettingsTab = "admins" | "system" | "notifications" | "tls" | "appearance";
 
 // Design handoff §10.
 export function Settings() {
@@ -22,6 +23,7 @@ export function Settings() {
             { value: "system", label: "System" },
             { value: "notifications", label: "Notifications" },
             { value: "tls", label: "TLS Certificate" },
+            { value: "appearance", label: "Appearance" },
           ]}
           active={tab}
           onChange={(value) => setTab(value as SettingsTab)}
@@ -31,6 +33,7 @@ export function Settings() {
       {tab === "system" && <SystemTab />}
       {tab === "notifications" && <NotificationsTab />}
       {tab === "tls" && <TlsCertificateTab />}
+      {tab === "appearance" && <AppearanceTab />}
     </div>
   );
 }

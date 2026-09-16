@@ -13,6 +13,7 @@ from app.api.routes import (
     alerts,
     audit_log,
     auth,
+    branding,
     config,
     exports,
     health,
@@ -116,6 +117,7 @@ app.include_router(queue.router, prefix="/api")
 app.include_router(admins.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
+app.include_router(branding.router, prefix="/api")
 app.include_router(notification_settings.router, prefix="/api")
 app.include_router(tls_settings.router, prefix="/api")
 

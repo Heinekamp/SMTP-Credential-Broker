@@ -18,7 +18,7 @@ export function Switch({ checked, onChange, disabled }: SwitchProps) {
         height: 24,
         borderRadius: 12,
         border: "1px solid var(--border-default)",
-        background: checked ? "var(--brand-green)" : "var(--surface-well)",
+        background: checked ? "var(--accent)" : "var(--surface-well)",
         position: "relative",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.4 : 1,
@@ -34,7 +34,7 @@ export function Switch({ checked, onChange, disabled }: SwitchProps) {
           width: 18,
           height: 18,
           borderRadius: "50%",
-          background: checked ? "var(--brand-green-ink)" : "var(--text-muted)",
+          background: checked ? "var(--text-on-accent)" : "var(--text-muted)",
         }}
       />
     </button>

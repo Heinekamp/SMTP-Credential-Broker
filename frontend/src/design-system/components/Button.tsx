@@ -46,9 +46,9 @@ export function Button({
   const variants: Record<NonNullable<ButtonProps["variant"]>, CSSProperties> = {
     default: {},
     accent: {
-      background: "var(--brand-green)",
-      color: "var(--brand-green-ink)",
-      borderColor: "var(--brand-green)",
+      background: "var(--accent)",
+      color: "var(--text-on-accent)",
+      borderColor: "var(--accent)",
       fontWeight: 600,
     },
     danger: {
@@ -66,9 +66,9 @@ export function Button({
 
   const activeStyle: CSSProperties = active
     ? {
-        background: "var(--brand-green)",
-        color: "var(--brand-green-ink)",
-        borderColor: "var(--brand-green)",
+        background: "var(--accent)",
+        color: "var(--text-on-accent)",
+        borderColor: "var(--accent)",
         fontWeight: 600,
       }
     : {};
