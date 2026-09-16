@@ -33,6 +33,13 @@ _LINES = [
     ),
 ]
 
+_RATE_LIMITED_REJECT_LINE = (
+    "Sep 14 10:00:03 relay postfix/submission/smtpd[1]: NOQUEUE: reject: END-OF-MESSAGE from "
+    "unknown[172.20.0.1]: 450 4.7.1 <printer-service>: rate limit exceeded, try again later; "
+    "from=<printer@example.com> to=<dest@example.net> proto=ESMTP helo=<client> "
+    "sasl_method=PLAIN sasl_username=printer-service"
+)
+
 
 @pytest.fixture()
 def _seed(db_session: Session) -> None:
@@ -88,6 +95,22 @@ def test_ingest_records_a_noqueue_rejection(db_session: Session, _seed: None, mo
     assert rejected.recipients == ["dest@example.net"]
     assert "not owned by user diag-user" in rejected.error
     assert rejected.queue_id.startswith("REJECT-")
+
+
+def test_ingest_attributes_a_rate_limit_rejection_to_the_local_user(
+    db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_tail(monkeypatch, [*_LINES, _RATE_LIMITED_REJECT_LINE])
+    ingest_new_log_lines(db_session)
+
+    local_user = db_session.query(LocalSmtpUser).filter(LocalSmtpUser.username == "printer-service").one()
+    rejected = (
+        db_session.query(MailLog)
+        .filter(MailLog.status == MailStatus.rejected, MailLog.local_smtp_user_id.is_not(None))
+        .one()
+    )
+    assert rejected.local_smtp_user_id == local_user.id
+    assert "rate limit exceeded" in rejected.error
 
 
 def test_ingest_persists_offset_and_is_idempotent(

@@ -114,6 +114,9 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
             continue
 
         if event.kind == "reject":
+            local_smtp_user_id = (
+                local_user_by_username.get(event.sasl_username) if event.sasl_username else None
+            )
             db.add(
                 MailLog(
                     # NOQUEUE rejections never get a real Postfix queue ID
@@ -122,6 +125,7 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
                     # unique contract still holds.
                     queue_id=f"REJECT-{uuid.uuid4().hex[:12]}",
                     timestamp=event.timestamp,
+                    local_smtp_user_id=local_smtp_user_id,
                     envelope_sender=event.envelope_sender or "",
                     recipients=[event.recipient] if event.recipient else [],
                     status=MailStatus.rejected,

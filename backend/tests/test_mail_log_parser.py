@@ -30,6 +30,12 @@ _NOQUEUE_REJECT_LINE = (
     "from=<noreply@example.com> to=<dest@example.net> proto=ESMTP helo=<client>"
 )
 _IGNORED_LINE = "Sep 14 10:00:00 relay postfix/smtpd[123]: connect from unknown[172.20.0.1]"
+_NOQUEUE_REJECT_WITH_SASL_LINE = (
+    "Sep 14 10:00:00 relay postfix/submission/smtpd[123]: NOQUEUE: reject: END-OF-MESSAGE from "
+    "unknown[172.20.0.1]: 450 4.7.1 <printer-service>: rate limit exceeded, try again later; "
+    "from=<printer@example.com> to=<dest@example.net> proto=ESMTP helo=<client> "
+    "sasl_method=PLAIN sasl_username=printer-service"
+)
 
 
 def test_auth_line_is_parsed() -> None:
@@ -90,6 +96,20 @@ def test_noqueue_reject_is_parsed() -> None:
     assert event.recipient == "dest@example.net"
     assert "not owned by user diag-user" in event.error
     assert event.error.startswith("553")
+    assert event.sasl_username is None
+
+
+def test_noqueue_reject_captures_sasl_username_when_present() -> None:
+    """A rate-limit policy-service defer (or any reject of an already-
+    authenticated session) carries sasl_username= in the tail — without
+    capturing it, a throttled local user's own rejections show up in
+    mail_log with no attribution at all."""
+    event = parse_line(_NOQUEUE_REJECT_WITH_SASL_LINE)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.sasl_username == "printer-service"
+    assert event.envelope_sender == "printer@example.com"
+    assert event.recipient == "dest@example.net"
 
 
 def test_irrelevant_lines_are_ignored() -> None:

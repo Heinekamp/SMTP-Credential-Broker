@@ -113,9 +113,16 @@ def parse_line(line: str) -> LogEvent | None:
         tail = noqueue.group("rest")
         from_match = _FROM_RE.search(tail)
         to_match = _TO_RE.search(tail)
+        # Postfix appends sasl_method=/sasl_username= to a reject line
+        # whenever the rejected session had already authenticated (e.g. a
+        # rate-limit policy-service defer at end-of-data) — without
+        # capturing it, a throttled local user's own rejections show up in
+        # mail_log with no attribution at all.
+        sasl_match = _SASL_USERNAME_RE.search(tail)
         return LogEvent(
             kind="reject",
             timestamp=timestamp,
+            sasl_username=sasl_match.group("value") if sasl_match else None,
             envelope_sender=from_match.group("value") if from_match else None,
             recipient=to_match.group("value") if to_match else None,
             error=noqueue.group("code_and_text").strip(),
