@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class NotificationSettingsRead(BaseModel):
@@ -11,6 +11,9 @@ class NotificationSettingsRead(BaseModel):
     notify_on_upstream_test_failure: bool
     notify_on_app_update_available: bool
     notify_on_postfix_update_available: bool
+    notify_on_rate_limit_abuse: bool
+    rate_limit_abuse_auto_disable_enabled: bool
+    rate_limit_abuse_threshold_minutes: int
     mail_log_retention_days: int | None
     audit_log_retention_days: int | None
 
@@ -28,6 +31,9 @@ class NotificationSettingsUpdate(BaseModel):
     notify_on_upstream_test_failure: bool | None = None
     notify_on_app_update_available: bool | None = None
     notify_on_postfix_update_available: bool | None = None
+    notify_on_rate_limit_abuse: bool | None = None
+    rate_limit_abuse_auto_disable_enabled: bool | None = None
+    rate_limit_abuse_threshold_minutes: int | None = Field(default=None, ge=1)
     mail_log_retention_days: int | None = None
     audit_log_retention_days: int | None = None
 

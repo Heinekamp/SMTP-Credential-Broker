@@ -589,6 +589,49 @@ only takes effect) alongside a `rate_limit_per_hour`, since its refill
 rate is derived from it; there is deliberately no independent knob for
 "how fast" a burst refills.
 
+**Abuse detection.** A hard reject only solves half the problem: a
+naive sender might not retry at all (the message is just silently,
+permanently lost) or might retry in a tight loop forever (hammering the
+relay indefinitely with no resolution). `evaluate()` tracks one more
+thing per user — `rate_limit_defer_streak_started_at`, the start of the
+current *unbroken* run of defers (hourly or burst, either counts), set
+once per streak and cleared on any permit. This is deliberately a
+timestamp, not a counter: "how long has this been continuous" is what
+actually distinguishes a genuinely stuck sender from one that's merely
+busy — a legitimately bursty client still gets occasional permits as the
+token bucket refills, so only something sending faster than the
+sustained rate *the entire time* ever crosses a duration threshold.
+
+Once that streak exceeds `RelaySettings.rate_limit_abuse_threshold_minutes`
+(default 10), it's surfaced two ways, kept deliberately independent of
+each other:
+
+- **The notification bell, unconditionally** — `core/alerts.py` emits one
+  alert per such user regardless of any setting, the same way
+  `health_degraded`/`upstream_test_failure` are already always-on
+  (their `notify_on_*` settings only ever gate email, never bell
+  visibility). This is what actually answers "what if the sending
+  software never surfaces the failure to anyone" — the admin sees it in
+  the console the next time they open it, with zero configuration.
+- **Email**, opt-in (`notify_on_rate_limit_abuse`, default off) — wired
+  into the existing edge-triggered alert-email pipeline
+  (`core/alert_email.py`'s `_STATE_TRACKED_KINDS`) exactly like the two
+  kinds above, one email on the resolved→active transition.
+
+A separate, explicit escalation — `rate_limit_abuse_auto_disable_enabled`
+(default off) — lets a background tick (`core/rate_limit_abuse.py`)
+disable a still-enabled flagged user outright, via the same
+`sasl_delete_user` call the manual disable switch already uses, with a
+full audit trail. This is intentionally decoupled from the alert: the
+bell/email fire from the streak column alone, so they stay accurate
+whether or not disabling ever manages to run (e.g. the control surface
+being briefly unreachable just retries next tick, without affecting
+alert visibility), and disabling never happens silently — the condition
+is always visible on the bell first regardless of whether this escalation
+is even turned on. Re-enabling a user clears the streak, giving it a
+clean slate once an admin has actually investigated rather than leaving
+it flagged forever after the underlying issue is already fixed.
+
 ### Per-upstream-account: native transport pacing, no policy service
 
 The goal here is the opposite of a hard ceiling: *hold the excess mail in

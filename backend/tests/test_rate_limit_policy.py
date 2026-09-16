@@ -168,6 +168,55 @@ def test_current_burst_tokens_reflects_the_stored_bucket(db_session: Session) ->
     assert rate_limit_policy.current_burst_tokens(db_session, user.id, 5, 3600) < 5.0
 
 
+def test_defer_starts_a_streak_and_permit_clears_it(db_session: Session) -> None:
+    user = _user(db_session, rate_limit_per_hour=1)
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # consumes the hourly budget
+
+    response = rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    assert response.startswith("action=DEFER")
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_started_at is not None
+
+    stale_window = rate_limit_policy._window_start(utcnow()) - datetime.timedelta(hours=1)
+    counter = (
+        db_session.query(LocalUserRateLimitCounter)
+        .filter(LocalUserRateLimitCounter.local_smtp_user_id == user.id)
+        .one()
+    )
+    counter.window_start = stale_window  # simulate the hour rolling over
+    db_session.commit()
+
+    response = rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    assert response == "action=DUNNO\n\n"
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_started_at is None
+
+
+def test_a_later_defer_does_not_overwrite_the_streak_start(db_session: Session) -> None:
+    user = _user(db_session, rate_limit_per_hour=1)
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # first defer
+    db_session.refresh(user)
+    first_streak_start = user.rate_limit_defer_streak_started_at
+    assert first_streak_start is not None
+
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # second defer
+
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_started_at == first_streak_start
+
+
+def test_a_burst_defer_also_starts_a_streak(db_session: Session) -> None:
+    user = _user(db_session, rate_limit_per_hour=3600, rate_limit_burst=1)
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # spends the only token
+
+    response = rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+
+    assert response == "action=DEFER sending too fast — try again in a moment\n\n"
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_started_at is not None
+
+
 def test_parse_attributes_splits_name_value_lines() -> None:
     lines = [b"sasl_username=printer-service", b"sender=printer@example.com", b"not-a-kv-line"]
     assert rate_limit_policy._parse_attributes(lines) == {

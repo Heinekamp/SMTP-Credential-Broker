@@ -39,6 +39,14 @@ class LocalSmtpUser(Base):
     # when rate_limit_per_hour is also set — see schemas/local_user.py's
     # cross-field validation.
     rate_limit_burst: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    # None = not currently in an unbroken streak of rejections. Set (only
+    # if not already set) on any defer by core/rate_limit_policy.py's
+    # evaluate(), cleared on any permit — or explicitly by re-enabling a
+    # disabled user (api/routes/local_users.py). Backs the always-visible
+    # rate_limit_abuse alert (core/alerts.py) and the opt-in auto-disable
+    # tick (core/rate_limit_abuse.py); a plain timestamp, not a counter,
+    # since "how long has this been continuous" is what actually matters.
+    rate_limit_defer_streak_started_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
 
     # passive_deletes=True: see the identical comment on Sender.permissions
     # (sender.py) — user_sender_permissions.local_smtp_user_id is part of

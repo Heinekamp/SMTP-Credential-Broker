@@ -10,6 +10,14 @@ export interface NotificationSettings {
   notify_on_upstream_test_failure: boolean;
   notify_on_app_update_available: boolean;
   notify_on_postfix_update_available: boolean;
+  /** Email once a local user has been throttled continuously past the
+   * threshold below. The condition itself always shows on the
+   * notification bell regardless of this setting. */
+  notify_on_rate_limit_abuse: boolean;
+  /** Automatically disables a still-enabled, continuously-throttled
+   * local user — a separate escalation on top of the alert above. */
+  rate_limit_abuse_auto_disable_enabled: boolean;
+  rate_limit_abuse_threshold_minutes: number;
   mail_log_retention_days: number | null;
   audit_log_retention_days: number | null;
 }

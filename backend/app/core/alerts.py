@@ -7,15 +7,18 @@ only tracks enough last-seen state to edge-trigger email, not the alerts
 themselves)."""
 
 import dataclasses
+import datetime
 from importlib.metadata import version
 
 from sqlalchemy.orm import Session
 
 from app.core import postfix_control
+from app.core.clock import utcnow
 from app.core.health import run_health_check
-from app.core.settings_store import get_background_job_state
+from app.core.settings_store import get_background_job_state, get_relay_settings
 from app.core.update_check import parse_version
 from app.models.enums import TestResult
+from app.models.local_user import LocalSmtpUser
 from app.models.upstream import UpstreamAccount
 
 
@@ -82,6 +85,39 @@ def compute_active_alerts(db: Session) -> list[Alert]:
                 detail=account.last_test_error or "",
                 target_type="upstream_account",
                 target_id=account.id,
+            )
+        )
+
+    settings_row = get_relay_settings(db)
+    cutoff = utcnow() - datetime.timedelta(minutes=settings_row.rate_limit_abuse_threshold_minutes)
+    throttled_users = (
+        db.query(LocalSmtpUser)
+        .filter(
+            LocalSmtpUser.rate_limit_defer_streak_started_at.is_not(None),
+            LocalSmtpUser.rate_limit_defer_streak_started_at <= cutoff,
+        )
+        .all()
+    )
+    for user in throttled_users:
+        since = user.rate_limit_defer_streak_started_at
+        if user.enabled:
+            detail = (
+                f"No messages have gone through since {since:%Y-%m-%d %H:%M} UTC — investigate before it "
+                "exhausts a shared upstream mailbox's tolerance."
+            )
+        else:
+            detail = (
+                f"Automatically disabled after being throttled continuously since {since:%Y-%m-%d %H:%M} UTC. "
+                "Re-enable it once the underlying issue is fixed."
+            )
+        alerts.append(
+            Alert(
+                kind="rate_limit_abuse",
+                key=f"rate_limit_abuse:{user.id}",
+                title=f'Local user "{user.name}" is being throttled continuously',
+                detail=detail,
+                target_type="local_smtp_user",
+                target_id=user.id,
             )
         )
 

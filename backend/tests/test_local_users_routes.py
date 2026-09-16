@@ -330,6 +330,32 @@ def test_re_enable_issues_a_new_password(
     assert verify_password(row.password_hash, new_password) is True
 
 
+def test_re_enable_clears_a_rate_limit_defer_streak(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    """A stuck streak (whether flagged manually or by
+    rate_limit_abuse.py's auto-disable tick) must not keep showing as
+    still-broken on the alerts bell once an admin has actually dealt
+    with it."""
+    from app.core.clock import utcnow
+
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "InvenTree", "username": "inventree"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+    row = db_session.get(LocalSmtpUser, user_id)
+    row.rate_limit_defer_streak_started_at = utcnow()
+    db_session.commit()
+
+    admin_client.patch(f"/api/local-users/{user_id}", json={"enabled": False}, headers=csrf_headers(admin_client))
+    admin_client.patch(f"/api/local-users/{user_id}", json={"enabled": True}, headers=csrf_headers(admin_client))
+
+    db_session.expire_all()
+    assert db_session.get(LocalSmtpUser, user_id).rate_limit_defer_streak_started_at is None
+
+
 def test_re_enable_never_touches_sasldb2_before_the_new_state_is_flushed_to_the_db(
     admin_client: TestClient, db_session: Session, fake_postfix_control: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:

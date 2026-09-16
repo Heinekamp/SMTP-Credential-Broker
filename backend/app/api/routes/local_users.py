@@ -189,6 +189,12 @@ def update_user(
             user.password_hash = hash_password(new_password)
             user.password_last_rotated_at = utcnow()
             user.enabled = True
+            # A clean slate — an admin re-enabling a user (whether it was
+            # disabled manually or by rate_limit_abuse.py's auto-disable
+            # tick) is exactly the "I've dealt with this" signal that
+            # should clear a stuck streak, rather than leaving it flagged
+            # on the alerts bell forever even after being fixed.
+            user.rate_limit_defer_streak_started_at = None
             db.flush()
             _set_sasl_or_503(user.username, new_password)
 

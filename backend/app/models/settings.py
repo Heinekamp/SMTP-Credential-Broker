@@ -55,6 +55,18 @@ class RelaySettings(Base):
     tls_dns_provider: Mapped[str] = mapped_column(nullable=False, default="cloudflare")
     tls_cloudflare_api_token_encrypted: Mapped[bytes | None] = mapped_column(nullable=True, default=None)
     tls_cloudflare_zone_id: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    # Rate-limit abuse detection (core/alerts.py, core/rate_limit_abuse.py).
+    # The alert itself (the notification bell) is always live regardless
+    # of these — same convention as notify_on_health_degraded/
+    # notify_on_upstream_test_failure, which only gate email, never bell
+    # visibility. Both default off (unlike those two, which predate this
+    # project's stricter "opt-in, never silently start doing something new
+    # on upgrade" convention) since this is a brand-new automated-behavior
+    # category — auto-disabling especially so, since it revokes a
+    # credential without a human in the loop.
+    notify_on_rate_limit_abuse: Mapped[bool] = mapped_column(nullable=False, default=False)
+    rate_limit_abuse_auto_disable_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    rate_limit_abuse_threshold_minutes: Mapped[int] = mapped_column(nullable=False, default=10)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 
@@ -87,4 +99,7 @@ class BackgroundJobState(Base):
     cert_last_renewal_attempt_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     cert_last_renewal_error: Mapped[str | None] = mapped_column(nullable=True, default=None)
     rate_limit_cleanup_last_run_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
+    # Edge-trigger for the rate_limit_abuse alert email — identical shape
+    # to health_degraded_active/upstream_test_failure_active above.
+    rate_limit_abuse_active: Mapped[bool] = mapped_column(nullable=False, default=False)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)

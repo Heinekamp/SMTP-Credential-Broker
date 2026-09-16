@@ -111,6 +111,7 @@ Credentials issued to internal services (InvenTree, monitoring, printers...).
 | `password_last_rotated_at` | timestamp, nullable | |
 | `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Enforced by the rate-limit policy service (postfix-architecture.md §10, security-model.md §10) against §12's counter table, keyed on this user's `username` as the authenticated SASL identity. |
 | `rate_limit_burst` | integer, nullable | `null` = no burst protection (default). Only accepted, and only enforced, alongside `rate_limit_per_hour` — its refill rate is always derived from that field (postfix-architecture.md §10's burst-protection subsection). Backed by §13's token-bucket table. |
+| `rate_limit_defer_streak_started_at` | timestamp, nullable | `null` = not currently in an unbroken streak of rejections. Set on any defer, cleared on any permit or on being re-enabled — backs the always-visible `rate_limit_abuse` alert and the opt-in auto-disable tick (postfix-architecture.md §10's abuse-detection subsection). |
 
 ## 6. `user_sender_permissions`
 
@@ -206,6 +207,9 @@ references a live `senders` row, which an env var can't express.
 | `notify_recipients` | JSON array of strings, not null | Alert email recipient addresses. |
 | `notify_sender_id` | FK → `senders.id`, nullable, `ON DELETE SET NULL` | Which configured sender alert emails are sent from. |
 | `notify_on_health_degraded` / `notify_on_upstream_test_failure` / `notify_on_app_update_available` / `notify_on_postfix_update_available` | boolean, not null, default true | Per-alert-kind email toggles — four fixed, known-in-advance kinds, so booleans on one row rather than a child table. |
+| `notify_on_rate_limit_abuse` | boolean, not null, default **false** | Same shape as the four above, but default off — a new automated-behavior category should not silently start emailing on upgrade the way the older baseline-monitoring kinds already did (postfix-architecture.md §10). |
+| `rate_limit_abuse_auto_disable_enabled` | boolean, not null, default false | Opt-in escalation: `core/rate_limit_abuse.py`'s tick disables a still-enabled flagged user outright, independent of the email toggle above. |
+| `rate_limit_abuse_threshold_minutes` | integer, not null, default 10 | How long a local user's unbroken defer streak must run before it's surfaced at all — always consulted for the notification-bell alert, regardless of the two toggles above. |
 | `updated_at` | timestamp, not null | |
 
 ## 11. `background_job_state`
@@ -222,7 +226,7 @@ operational state for the background scheduler, matching
 | `latest_app_version_checked_at` / `latest_postfix_version_checked_at` | timestamp, nullable | |
 | `app_update_last_emailed_version` / `postfix_update_last_emailed_version` | text, nullable | Edge-trigger state — an update email fires once per newly-seen version, not on every poll. |
 | `app_update_acknowledged_version` / `postfix_update_acknowledged_version` | text, nullable | An admin-acknowledged *version*, not a plain dismissed flag — a newer release automatically reactivates the alert. |
-| `health_degraded_active` / `upstream_test_failure_active` | boolean, not null, default false | Last-seen state per alert kind, so email only fires on a resolved→active transition. |
+| `health_degraded_active` / `upstream_test_failure_active` / `rate_limit_abuse_active` | boolean, not null, default false | Last-seen state per alert kind, so email only fires on a resolved→active transition. `rate_limit_abuse_active` is bundled across every currently-flagged user into one gauge, exactly like `upstream_test_failure_active` already bundles multiple failing accounts. |
 | `rate_limit_cleanup_last_run_at` | timestamp, nullable | Last time §12's stale counter rows were swept up (postfix-architecture.md §10). |
 | `updated_at` | timestamp, not null | |
 

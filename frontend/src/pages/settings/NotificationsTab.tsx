@@ -51,6 +51,9 @@ export function NotificationsTab() {
   const [notifyUpstream, setNotifyUpstream] = useState(true);
   const [notifyAppUpdate, setNotifyAppUpdate] = useState(true);
   const [notifyPostfixUpdate, setNotifyPostfixUpdate] = useState(true);
+  const [notifyRateLimitAbuse, setNotifyRateLimitAbuse] = useState(false);
+  const [autoDisableEnabled, setAutoDisableEnabled] = useState(false);
+  const [abuseThresholdMinutes, setAbuseThresholdMinutes] = useState("10");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -64,6 +67,9 @@ export function NotificationsTab() {
     setNotifyUpstream(settings.notify_on_upstream_test_failure);
     setNotifyAppUpdate(settings.notify_on_app_update_available);
     setNotifyPostfixUpdate(settings.notify_on_postfix_update_available);
+    setNotifyRateLimitAbuse(settings.notify_on_rate_limit_abuse);
+    setAutoDisableEnabled(settings.rate_limit_abuse_auto_disable_enabled);
+    setAbuseThresholdMinutes(String(settings.rate_limit_abuse_threshold_minutes));
   }, [settings]);
 
   const [testResult, setTestResult] = useState<TestAlertResult | null>(null);
@@ -101,6 +107,9 @@ export function NotificationsTab() {
       notify_on_upstream_test_failure: notifyUpstream,
       notify_on_app_update_available: notifyAppUpdate,
       notify_on_postfix_update_available: notifyPostfixUpdate,
+      notify_on_rate_limit_abuse: notifyRateLimitAbuse,
+      rate_limit_abuse_auto_disable_enabled: autoDisableEnabled,
+      rate_limit_abuse_threshold_minutes: abuseThresholdMinutes.trim() === "" ? 10 : Number(abuseThresholdMinutes),
     });
   }
 
@@ -185,6 +194,10 @@ export function NotificationsTab() {
             <span style={{ fontSize: "var(--text-sm)" }}>Postfix update available</span>
             <Switch checked={notifyPostfixUpdate} onChange={setNotifyPostfixUpdate} />
           </div>
+          <div style={rowStyle}>
+            <span style={{ fontSize: "var(--text-sm)" }}>Local user throttled continuously (rate-limit abuse)</span>
+            <Switch checked={notifyRateLimitAbuse} onChange={setNotifyRateLimitAbuse} />
+          </div>
         </div>
 
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
@@ -216,6 +229,33 @@ export function NotificationsTab() {
             </p>
           )}
         </div>
+      </Card>
+
+      <Card title="Rate-Limit Abuse Detection">
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
+          A local user that's been continuously throttled — never once sent successfully — for longer than the
+          threshold below always shows on the notification bell above, regardless of these settings. These add an
+          email (toggle above) and, separately, an automatic disable.
+        </p>
+
+        <div style={fieldLabelStyle}>Threshold (minutes)</div>
+        <TextInput
+          type="number"
+          min={1}
+          value={abuseThresholdMinutes}
+          onChange={(e) => setAbuseThresholdMinutes(e.target.value)}
+          style={{ width: "100%", marginBottom: 12 }}
+        />
+
+        <div style={rowStyle}>
+          <span style={{ fontSize: "var(--text-sm)" }}>Automatically disable the credential</span>
+          <Switch checked={autoDisableEnabled} onChange={setAutoDisableEnabled} />
+        </div>
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
+          Stops <em>all</em> of that credential's mail, not just the excess — a real availability cost if you're
+          slow to react, weighed against a stuck sender hammering a shared upstream mailbox indefinitely.
+          Re-enabling a disabled user clears the flag and gives it a clean slate.
+        </p>
       </Card>
 
       <div style={{ gridColumn: "1 / -1" }}>

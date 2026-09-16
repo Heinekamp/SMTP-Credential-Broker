@@ -43,8 +43,37 @@ def test_get_returns_defaults_on_a_fresh_install(admin_client: TestClient) -> No
     assert body["notify_sender_id"] is None
     assert body["notify_from_name"] is None
     assert body["notify_on_health_degraded"] is True
+    assert body["notify_on_rate_limit_abuse"] is False
+    assert body["rate_limit_abuse_auto_disable_enabled"] is False
+    assert body["rate_limit_abuse_threshold_minutes"] == 10
     assert body["mail_log_retention_days"] is None
     assert body["audit_log_retention_days"] is None
+
+
+def test_patch_can_set_rate_limit_abuse_settings(admin_client: TestClient) -> None:
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={
+            "notify_on_rate_limit_abuse": True,
+            "rate_limit_abuse_auto_disable_enabled": True,
+            "rate_limit_abuse_threshold_minutes": 5,
+        },
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["notify_on_rate_limit_abuse"] is True
+    assert body["rate_limit_abuse_auto_disable_enabled"] is True
+    assert body["rate_limit_abuse_threshold_minutes"] == 5
+
+
+def test_patch_rejects_a_non_positive_rate_limit_abuse_threshold(admin_client: TestClient) -> None:
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"rate_limit_abuse_threshold_minutes": 0},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
 
 
 def test_patch_can_set_and_clear_the_from_name(admin_client: TestClient) -> None:

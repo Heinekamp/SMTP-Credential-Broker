@@ -153,6 +153,60 @@ def test_disabled_toggle_suppresses_the_email_entirely(monkeypatch: pytest.Monke
     assert sent == []
 
 
+def test_rate_limit_abuse_sends_once_on_resolved_to_active_transition(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bundled into a single active/inactive gauge exactly like
+    upstream_test_failure, even though core/alerts.py can emit one Alert
+    per throttled user — this mirrors that kind's test exactly."""
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    _configure(db, sender_id=sender.id)
+    get_relay_settings(db).notify_on_rate_limit_abuse = True
+    db.commit()
+    db.close()
+
+    sent = []
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [
+            Alert(
+                kind="rate_limit_abuse",
+                key="rate_limit_abuse:1",
+                title='Local user "Printer" is being throttled continuously',
+                detail="d",
+                target_type="local_smtp_user",
+                target_id=1,
+            )
+        ],
+    )
+
+    _run()
+    assert len(sent) == 1
+
+    db = SessionLocal()
+    assert get_background_job_state(db).rate_limit_abuse_active is True
+    db.close()
+
+    _run()  # still active — must not send a second time
+    assert len(sent) == 1
+
+
+def test_rate_limit_abuse_email_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    _configure(db, sender_id=sender.id)
+    db.close()
+
+    sent = []
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [Alert(kind="rate_limit_abuse", key="rate_limit_abuse:1", title="t", detail="d")],
+    )
+    _run()
+    assert sent == []
+
+
 def test_update_available_sends_once_per_new_version(monkeypatch: pytest.MonkeyPatch) -> None:
     db = SessionLocal()
     sender = _configured_sender(db)

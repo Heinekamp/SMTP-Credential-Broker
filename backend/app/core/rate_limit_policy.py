@@ -125,6 +125,15 @@ def evaluate(db: Session, attrs: dict[str, str]) -> str:
         if bucket is not None:
             bucket.tokens = tokens_after
             bucket.last_refill_at = now
+        # Marks the start of an unbroken streak of rejections — only set
+        # once, left alone by every later defer in the same streak.
+        # core/alerts.py surfaces a streak past
+        # rate_limit_abuse_threshold_minutes on the notification bell
+        # unconditionally, and core/rate_limit_abuse.py's opt-in tick can
+        # act on it — this module only ever records the fact, never
+        # alerts or disables anything itself.
+        if user.rate_limit_defer_streak_started_at is None:
+            user.rate_limit_defer_streak_started_at = now
         db.commit()
         if not hourly_ok:
             return _HOURLY_DEFER.format(limit=user.rate_limit_per_hour)
@@ -134,6 +143,7 @@ def evaluate(db: Session, attrs: dict[str, str]) -> str:
     if bucket is not None:
         bucket.tokens = tokens_after - 1.0
         bucket.last_refill_at = now
+    user.rate_limit_defer_streak_started_at = None
     db.commit()
     return _DUNNO
 

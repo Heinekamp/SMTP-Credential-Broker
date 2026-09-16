@@ -23,11 +23,17 @@ from app.models.sender import Sender
 _logger = get_logger("alert_email")
 
 # (alert kind, relay_settings toggle attribute, background_job_state
-# "currently active" attribute) — the two category-level kinds that are
+# "currently active" attribute) — the category-level kinds that are
 # edge-triggered on a boolean transition rather than a version change.
+# rate_limit_abuse is per-entity (core/alerts.py emits one Alert per
+# throttled local user) but is bundled into a single active/inactive
+# gauge here exactly like upstream_test_failure already is — one email on
+# the 0->1 transition, naming whichever alert compute_active_alerts()
+# happens to return first, not one email per affected user.
 _STATE_TRACKED_KINDS = (
     ("health_degraded", "notify_on_health_degraded", "health_degraded_active"),
     ("upstream_test_failure", "notify_on_upstream_test_failure", "upstream_test_failure_active"),
+    ("rate_limit_abuse", "notify_on_rate_limit_abuse", "rate_limit_abuse_active"),
 )
 
 # (alert kind, relay_settings toggle attribute, background_job_state
