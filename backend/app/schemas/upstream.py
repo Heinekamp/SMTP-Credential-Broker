@@ -24,6 +24,9 @@ class UpstreamAccountCreate(BaseModel):
     tls_mode: TlsMode = TlsMode.starttls
     username: str = Field(pattern=_UPSTREAM_USERNAME_PATTERN)
     password: str = Field(min_length=1)
+    # None = unlimited (today's behavior) — paced, not rejected, by a
+    # synthetic per-account Postfix transport (core/config_generator.py).
+    rate_limit_per_hour: int | None = Field(default=None, ge=1)
 
 
 class UpstreamAccountUpdate(BaseModel):
@@ -40,6 +43,7 @@ class UpstreamAccountUpdate(BaseModel):
     username: str | None = Field(default=None, pattern=_UPSTREAM_USERNAME_PATTERN)
     password: str | None = None
     enabled: bool | None = None
+    rate_limit_per_hour: int | None = Field(default=None, ge=1)
 
 
 class UpstreamAccountRead(BaseModel):
@@ -57,6 +61,11 @@ class UpstreamAccountRead(BaseModel):
     last_test_error: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    rate_limit_per_hour: int | None
+    # How many messages this account has actually sent in the last hour —
+    # a real Postfix delivery count (mail_log), not the pacing computation
+    # itself; read-only, for the API/UI usage readout.
+    sent_this_hour: int
     # encrypted_password is deliberately absent — no field is ever defined
     # for it on an output schema (security-model.md §5's enforcement by
     # omission, not a redaction step applied at serialization time).

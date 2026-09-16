@@ -16,11 +16,15 @@ class LocalUserCreate(BaseModel):
     # this today, so this is defense-in-depth, not a cross-privilege
     # exploit.
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    # None = unlimited (today's behavior) — enforced by
+    # core/rate_limit_policy.py, not set here at creation time by default.
+    rate_limit_per_hour: int | None = Field(default=None, ge=1)
 
 
 class LocalUserUpdate(BaseModel):
     name: str | None = None
     enabled: bool | None = None
+    rate_limit_per_hour: int | None = Field(default=None, ge=1)
 
 
 class LocalUserRead(BaseModel):
@@ -33,6 +37,11 @@ class LocalUserRead(BaseModel):
     created_at: datetime.datetime
     password_last_rotated_at: datetime.datetime | None
     allowed_sender_count: int
+    rate_limit_per_hour: int | None
+    # How many messages this user has sent in the current hourly window —
+    # the exact bucket core/rate_limit_policy.py itself checks against,
+    # read-only (never itself a knob).
+    sent_this_hour: int
     # password / password_hash intentionally absent — see local_user.py's
     # model comment and security-model.md §5.
 

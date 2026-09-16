@@ -139,6 +139,84 @@ def test_regenerate_never_touches_sasldb2_before_the_new_hash_is_flushed_to_the_
     assert fake_postfix_control == []
 
 
+def test_create_accepts_a_rate_limit(admin_client: TestClient, fake_postfix_control: list) -> None:
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_per_hour": 20},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 201
+    body = response.json()["user"]
+    assert body["rate_limit_per_hour"] == 20
+    assert body["sent_this_hour"] == 0
+
+
+def test_create_defaults_to_unlimited(admin_client: TestClient, fake_postfix_control: list) -> None:
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.json()["user"]["rate_limit_per_hour"] is None
+
+
+def test_create_rejects_a_non_positive_rate_limit(admin_client: TestClient, fake_postfix_control: list) -> None:
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_per_hour": 0},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+    assert fake_postfix_control == []
+
+
+def test_update_sets_and_clears_the_rate_limit(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}", json={"rate_limit_per_hour": 20}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 200
+    assert response.json()["user"]["rate_limit_per_hour"] == 20
+
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}", json={"rate_limit_per_hour": None}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 200
+    assert response.json()["user"]["rate_limit_per_hour"] is None
+    db_session.expire_all()
+    assert db_session.get(LocalSmtpUser, user_id).rate_limit_per_hour is None
+
+
+def test_sent_this_hour_reflects_the_current_window_counter(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    from app.core.clock import utcnow
+    from app.core.rate_limit_policy import _window_start
+    from app.models.rate_limit import LocalUserRateLimitCounter
+
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_per_hour": 20},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+    db_session.add(
+        LocalUserRateLimitCounter(local_smtp_user_id=user_id, window_start=_window_start(utcnow()), count=3)
+    )
+    db_session.commit()
+
+    response = admin_client.get(f"/api/local-users/{user_id}")
+    assert response.json()["sent_this_hour"] == 3
+
+
 def test_disable_deletes_sasl_entry(admin_client: TestClient, fake_postfix_control: list) -> None:
     created = admin_client.post(
         "/api/local-users",

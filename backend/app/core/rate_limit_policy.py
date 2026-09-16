@@ -83,6 +83,23 @@ def evaluate(db: Session, attrs: dict[str, str]) -> str:
     return _DUNNO
 
 
+def current_usage(db: Session, local_smtp_user_id: int) -> int:
+    """How many messages this local user has sent in the current hourly
+    window — the exact bucket evaluate() itself checks against. Read-only,
+    for the API/UI usage readout; never itself part of the accept/defer
+    decision path."""
+    window_start = _window_start(utcnow())
+    counter = (
+        db.query(LocalUserRateLimitCounter)
+        .filter(
+            LocalUserRateLimitCounter.local_smtp_user_id == local_smtp_user_id,
+            LocalUserRateLimitCounter.window_start == window_start,
+        )
+        .one_or_none()
+    )
+    return counter.count if counter is not None else 0
+
+
 def _parse_attributes(lines: list[bytes]) -> dict[str, str]:
     """One policy request's attribute lines (already split, blank line
     excluded) into a name->value dict, per SMTPD_POLICY_README's

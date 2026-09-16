@@ -125,6 +125,86 @@ def test_update_with_password_rotates_it(admin_client: TestClient, db_session: S
     assert decrypt_secret(row.encrypted_password) == "new-upstream-secret"
 
 
+def test_create_accepts_a_rate_limit(admin_client: TestClient, db_session: Session) -> None:
+    created = _create(admin_client, rate_limit_per_hour=100)
+
+    assert created["rate_limit_per_hour"] == 100
+    assert created["sent_this_hour"] == 0
+    row = db_session.get(UpstreamAccount, created["id"])
+    assert row.rate_limit_per_hour == 100
+
+
+def test_create_defaults_to_unlimited(admin_client: TestClient) -> None:
+    created = _create(admin_client)
+    assert created["rate_limit_per_hour"] is None
+
+
+def test_create_rejects_a_non_positive_rate_limit(admin_client: TestClient) -> None:
+    response = admin_client.post(
+        "/api/upstream-accounts",
+        json={**PAYLOAD, "rate_limit_per_hour": 0},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
+def test_update_sets_and_clears_the_rate_limit(admin_client: TestClient, db_session: Session) -> None:
+    created = _create(admin_client)
+
+    response = admin_client.patch(
+        f"/api/upstream-accounts/{created['id']}",
+        json={"rate_limit_per_hour": 50},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 200
+    assert response.json()["rate_limit_per_hour"] == 50
+
+    response = admin_client.patch(
+        f"/api/upstream-accounts/{created['id']}",
+        json={"rate_limit_per_hour": None},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 200
+    assert response.json()["rate_limit_per_hour"] is None
+    db_session.expire_all()
+    assert db_session.get(UpstreamAccount, created["id"]).rate_limit_per_hour is None
+
+
+def test_sent_this_hour_reflects_recent_mail_log_deliveries(admin_client: TestClient, db_session: Session) -> None:
+    import datetime
+
+    from app.core.clock import utcnow
+    from app.models.enums import MailStatus
+    from app.models.mail_log import MailLog
+
+    created = _create(admin_client)
+    db_session.add(
+        MailLog(
+            queue_id="Q1",
+            timestamp=utcnow() - datetime.timedelta(minutes=10),
+            envelope_sender="a@example.com",
+            recipients=["b@example.net"],
+            status=MailStatus.sent,
+            upstream_account_id=created["id"],
+        )
+    )
+    db_session.add(
+        MailLog(
+            queue_id="Q2",
+            timestamp=utcnow() - datetime.timedelta(hours=2),  # outside the 1h window
+            envelope_sender="a@example.com",
+            recipients=["b@example.net"],
+            status=MailStatus.sent,
+            upstream_account_id=created["id"],
+        )
+    )
+    db_session.commit()
+
+    response = admin_client.get(f"/api/upstream-accounts/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["sent_this_hour"] == 1
+
+
 def test_delete_precheck_lists_dependent_senders(admin_client: TestClient, db_session: Session) -> None:
     created = _create(admin_client)
     db_session.add(Sender(address="noreply@example.com", upstream_account_id=created["id"]))

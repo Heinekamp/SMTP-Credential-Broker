@@ -9,6 +9,7 @@ from app.core.clock import utcnow
 from app.core.password_generation import generate_password
 from app.core.permissions import grant_permission, revoke_permission
 from app.core.postfix_control import PostfixControlError
+from app.core.rate_limit_policy import current_usage
 from app.core.security import hash_password
 from app.models.admin import AdminUser
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
@@ -51,6 +52,8 @@ def _to_read(db: Session, user: LocalSmtpUser) -> LocalUserRead:
         created_at=user.created_at,
         password_last_rotated_at=user.password_last_rotated_at,
         allowed_sender_count=_allowed_sender_count(db, user.id),
+        rate_limit_per_hour=user.rate_limit_per_hour,
+        sent_this_hour=current_usage(db, user.id),
     )
 
 
@@ -95,6 +98,7 @@ def create_user(
         username=payload.username,
         password_hash=hash_password(password),
         password_last_rotated_at=utcnow(),
+        rate_limit_per_hour=payload.rate_limit_per_hour,
     )
     db.add(user)
     db.flush()  # surfaces DB-level errors before the external sasldb2 call
@@ -171,6 +175,9 @@ def update_user(
 
     if "name" in data and data["name"] is not None:
         user.name = data["name"]
+
+    if "rate_limit_per_hour" in data:
+        user.rate_limit_per_hour = data["rate_limit_per_hour"]
 
     record_audit(
         db,

@@ -1,13 +1,18 @@
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
 from app.core.audit import client_ip, record_audit
+from app.core.clock import utcnow
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret, encrypt_secret
 from app.core.test_connection import test_upstream_connection
 from app.core.upstream_testing import apply_test_result
 from app.models.admin import AdminUser
+from app.models.enums import MailStatus
+from app.models.mail_log import MailLog
 from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 from app.schemas.upstream import (
@@ -40,9 +45,45 @@ def _encrypt_or_503(password: str) -> bytes:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
 
+def _sent_this_hour(db: Session, account_id: int) -> int:
+    """A real Postfix delivery count over the last hour (mail_log), not
+    the pacing computation itself — the account may have no rate limit
+    configured at all and this readout is still meaningful."""
+    cutoff = utcnow() - datetime.timedelta(hours=1)
+    return (
+        db.query(MailLog)
+        .filter(
+            MailLog.upstream_account_id == account_id,
+            MailLog.status == MailStatus.sent,
+            MailLog.timestamp >= cutoff,
+        )
+        .count()
+    )
+
+
+def _to_read(db: Session, account: UpstreamAccount) -> UpstreamAccountRead:
+    return UpstreamAccountRead(
+        id=account.id,
+        name=account.name,
+        host=account.host,
+        port=account.port,
+        tls_mode=account.tls_mode,
+        username=account.username,
+        enabled=account.enabled,
+        last_test_at=account.last_test_at,
+        last_test_result=account.last_test_result,
+        last_test_error=account.last_test_error,
+        created_at=account.created_at,
+        updated_at=account.updated_at,
+        rate_limit_per_hour=account.rate_limit_per_hour,
+        sent_this_hour=_sent_this_hour(db, account.id),
+    )
+
+
 @router.get("", response_model=list[UpstreamAccountRead])
-def list_accounts(db: Session = Depends(get_db)) -> list[UpstreamAccount]:
-    return db.query(UpstreamAccount).order_by(UpstreamAccount.name).all()
+def list_accounts(db: Session = Depends(get_db)) -> list[UpstreamAccountRead]:
+    accounts = db.query(UpstreamAccount).order_by(UpstreamAccount.name).all()
+    return [_to_read(db, a) for a in accounts]
 
 
 @router.post(
@@ -56,7 +97,7 @@ def create_account(
     request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
-) -> UpstreamAccount:
+) -> UpstreamAccountRead:
     account = UpstreamAccount(
         name=payload.name,
         host=payload.host,
@@ -64,6 +105,7 @@ def create_account(
         tls_mode=payload.tls_mode,
         username=payload.username,
         encrypted_password=_encrypt_or_503(payload.password),
+        rate_limit_per_hour=payload.rate_limit_per_hour,
     )
     db.add(account)
     db.flush()
@@ -78,12 +120,12 @@ def create_account(
     )
     db.commit()
     db.refresh(account)
-    return account
+    return _to_read(db, account)
 
 
 @router.get("/{account_id}", response_model=UpstreamAccountRead)
-def get_account(account_id: int, db: Session = Depends(get_db)) -> UpstreamAccount:
-    return _get_or_404(db, account_id)
+def get_account(account_id: int, db: Session = Depends(get_db)) -> UpstreamAccountRead:
+    return _to_read(db, _get_or_404(db, account_id))
 
 
 @router.patch("/{account_id}", response_model=UpstreamAccountRead, dependencies=[Depends(require_csrf)])
@@ -93,7 +135,7 @@ def update_account(
     request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
-) -> UpstreamAccount:
+) -> UpstreamAccountRead:
     account = _get_or_404(db, account_id)
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
@@ -114,7 +156,7 @@ def update_account(
     )
     db.commit()
     db.refresh(account)
-    return account
+    return _to_read(db, account)
 
 
 @router.get("/{account_id}/delete-precheck", response_model=DeletePrecheck)
