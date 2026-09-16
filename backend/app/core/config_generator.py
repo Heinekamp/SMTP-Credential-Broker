@@ -13,6 +13,7 @@ from app.core.permissions import enabled_senders_with_upstream, sender_login_map
 from app.models.config_generation import ConfigGeneration
 from app.models.enums import TlsMode, ValidationResult
 from app.models.sender import Sender
+from app.models.upstream import UpstreamAccount
 
 _ENV = jinja2.Environment(
     loader=jinja2.PackageLoader("app", "templates"),
@@ -24,6 +25,54 @@ _ENV = jinja2.Environment(
 
 def _tab_join(*fields: str) -> str:
     return "\t".join(fields)
+
+
+def _transport_name_for(account: UpstreamAccount) -> str | None:
+    """Which synthetic master.cf transport (if any) a sender using this
+    upstream account must route through — `None` means the default
+    `smtp` transport is fine. A rate limit always wins the naming: an
+    account needing pacing gets its own `rl_acct{id}` transport (carrying
+    wrappermode too, if that account is also implicit-TLS), so it never
+    fights over one sender with the shared `smtp_implicit_tls` transport
+    from #57. Accounts that are implicit-TLS but not rate-limited keep
+    using that existing shared transport completely unchanged."""
+    if account.rate_limit_per_hour is not None:
+        return f"rl_acct{account.id}"
+    if account.tls_mode is TlsMode.implicit:
+        return "smtp_implicit_tls"
+    return None
+
+
+def _rate_delay_seconds(rate_limit_per_hour: int) -> int:
+    # Spaces deliveries evenly rather than enforcing an exact per-clock-
+    # hour bucket — smoothing/pacing, not a hard quota (docs/configuration.md).
+    return -(-3600 // rate_limit_per_hour)  # ceil(3600 / N), no float rounding
+
+
+@dataclasses.dataclass
+class RateLimitedAccountTransport:
+    account_id: int
+    implicit_tls: bool
+    rate_delay_seconds: int
+
+
+def _rate_limited_account_transports(db: Session) -> list[RateLimitedAccountTransport]:
+    """One entry per distinct upstream account that needs a synthetic
+    master.cf transport for pacing — deduplicated (multiple senders can
+    share one account) and sorted by id for deterministic config output."""
+    accounts: dict[int, UpstreamAccount] = {}
+    for sender in enabled_senders_with_upstream(db):
+        account = sender.upstream_account
+        if account.rate_limit_per_hour is not None:
+            accounts[account.id] = account
+    return [
+        RateLimitedAccountTransport(
+            account_id=account.id,
+            implicit_tls=account.tls_mode is TlsMode.implicit,
+            rate_delay_seconds=_rate_delay_seconds(account.rate_limit_per_hour),
+        )
+        for account in sorted(accounts.values(), key=lambda a: a.id)
+    ]
 
 
 def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
@@ -41,21 +90,22 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
 
     relayhost_lines: list[str] = []
     sasl_passwd_lines: list[str] = []
-    # Only implicit-TLS (wrapped, e.g. port 465) senders need an entry
-    # here — everyone else falls through to the default `smtp` transport
-    # via master.cf.j2's sender_dependent_default_transport_maps comment.
+    # Only senders whose account needs a non-default transport (implicit
+    # TLS and/or a rate limit) need an entry here — everyone else falls
+    # through to the default `smtp` transport via master.cf.j2's
+    # sender_dependent_default_transport_maps comment.
     sender_transport_lines: list[str] = []
     for sender in enabled_senders_with_upstream(db):
         account = sender.upstream_account
         relayhost_lines.append(_tab_join(sender.address, f"[{account.host}]:{account.port}"))
         password = decrypt_secret(account.encrypted_password)
         sasl_passwd_lines.append(_tab_join(sender.address, f"{account.username}:{password}"))
-        if account.tls_mode is TlsMode.implicit:
+        transport_name = _transport_name_for(account)
+        if transport_name is not None:
             # Empty nexthop after the colon — Postfix still resolves the
             # actual host:port via sender_dependent_relayhost_maps above,
-            # this only selects which transport (and therefore whether
-            # smtp_tls_wrappermode applies) handles the sender.
-            sender_transport_lines.append(_tab_join(sender.address, "smtp_implicit_tls:"))
+            # this only selects which transport handles the sender.
+            sender_transport_lines.append(_tab_join(sender.address, f"{transport_name}:"))
 
     all_senders = db.execute(select(Sender)).scalars().all()
     working_addresses = {s.address for s in enabled_senders_with_upstream(db)}
@@ -77,14 +127,16 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
     return maps, warnings
 
 
-def _render_config() -> tuple[str, str]:
+def _render_config(db: Session) -> tuple[str, str]:
     settings = get_settings()
     main_cf = _ENV.get_template("main.cf.j2").render(
         myhostname=settings.submission_host,
         mydomain=settings.submission_host,
         policy_service_port=settings.policy_service_port,
     )
-    master_cf = _ENV.get_template("master.cf.j2").render()
+    master_cf = _ENV.get_template("master.cf.j2").render(
+        rate_limited_accounts=_rate_limited_account_transports(db),
+    )
     return main_cf, master_cf
 
 
@@ -103,7 +155,7 @@ def current_state_checksums(db: Session) -> tuple[str, str]:
     calling the control surface — used by health checks
     (architecture.md §7) to detect "DB state changed since the last
     successful generation" drift."""
-    main_cf, master_cf = _render_config()
+    main_cf, master_cf = _render_config(db)
     maps, _ = _build_maps(db)
     return _checksum(main_cf, master_cf), _maps_checksum(maps)
 
@@ -125,7 +177,7 @@ def generate_and_apply(db: Session, *, triggered_by_admin_id: int | None, dry_ru
     installs (the control surface's apply_config always installs on
     success, so a true dry-run only renders locally and skips the RPC
     entirely; see the CLI command for how that's surfaced)."""
-    main_cf, master_cf = _render_config()
+    main_cf, master_cf = _render_config(db)
     maps, warnings = _build_maps(db)
     checksum = _checksum(main_cf, master_cf)
     maps_checksum = _maps_checksum(maps)

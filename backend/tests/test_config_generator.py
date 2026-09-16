@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.orm import Session
 
-from app.core.config_generator import _build_maps, generate_and_apply
+from app.core.config_generator import _build_maps, _rate_limited_account_transports, _render_config, generate_and_apply
 from app.core.permissions import grant_permission
 from app.core.postfix_control import ApplyConfigResult, PostfixControlError, PostfixStatus
 from app.models.enums import TlsMode
@@ -18,6 +18,7 @@ def _upstream(
     enabled: bool = True,
     tls_mode: TlsMode = TlsMode.starttls,
     port: int = 587,
+    rate_limit_per_hour: int | None = None,
 ) -> UpstreamAccount:
     from app.core.encryption import encrypt_secret
 
@@ -29,6 +30,7 @@ def _upstream(
         username=username,
         encrypted_password=encrypt_secret("upstream-secret"),
         enabled=enabled,
+        rate_limit_per_hour=rate_limit_per_hour,
     )
     db.add(account)
     db.flush()
@@ -149,6 +151,73 @@ def test_starttls_sender_is_absent_from_sender_transport_when_mixed_with_implici
     maps, _ = _build_maps(db_session)
 
     assert maps["sender_transport"].strip() == "printer@example.com\tsmtp_implicit_tls:"
+
+
+def test_rate_limited_sender_gets_a_synthetic_transport_entry(db_session: Session) -> None:
+    account = _upstream(db_session, "STRATO paced", "printer@example.com", rate_limit_per_hour=100)
+    _sender(db_session, "printer@example.com", account)
+
+    maps, _ = _build_maps(db_session)
+
+    assert maps["sender_transport"].strip() == f"printer@example.com\trl_acct{account.id}:"
+
+
+def test_rate_limited_implicit_tls_account_uses_the_combined_transport_not_the_shared_one(
+    db_session: Session,
+) -> None:
+    """A rate-limited account that's also implicit-TLS can't route through
+    both the shared smtp_implicit_tls transport and its own rl_acct{id}
+    transport at once — the combined one must win, carrying wrappermode
+    itself (config_generator._transport_name_for)."""
+    account = _upstream(
+        db_session,
+        "STRATO implicit + paced",
+        "printer@example.com",
+        tls_mode=TlsMode.implicit,
+        port=465,
+        rate_limit_per_hour=50,
+    )
+    _sender(db_session, "printer@example.com", account)
+
+    maps, _ = _build_maps(db_session)
+
+    assert maps["sender_transport"].strip() == f"printer@example.com\trl_acct{account.id}:"
+
+
+def test_rate_limited_account_transports_dedups_and_computes_ceil_delay(db_session: Session) -> None:
+    account = _upstream(db_session, "STRATO paced", "printer@example.com", rate_limit_per_hour=7)
+    _sender(db_session, "printer@example.com", account)
+    _sender(db_session, "alerts@example.com", account)  # same account, second sender
+
+    transports = _rate_limited_account_transports(db_session)
+
+    assert len(transports) == 1
+    assert transports[0].account_id == account.id
+    assert transports[0].implicit_tls is False
+    assert transports[0].rate_delay_seconds == 515  # ceil(3600 / 7)
+
+
+def test_render_config_emits_a_synthetic_transport_stanza_for_a_rate_limited_account(
+    db_session: Session,
+) -> None:
+    account = _upstream(db_session, "STRATO paced", "printer@example.com", rate_limit_per_hour=100)
+    _sender(db_session, "printer@example.com", account)
+
+    _, master_cf = _render_config(db_session)
+
+    assert f"rl_acct{account.id} unix" in master_cf
+    assert "smtp_destination_rate_delay=36s" in master_cf  # ceil(3600/100)
+    assert "smtp_destination_concurrency_limit=1" in master_cf
+
+
+def test_render_config_omits_the_synthetic_transport_when_nothing_is_rate_limited(db_session: Session) -> None:
+    account = _upstream(db_session, "STRATO", "printer@example.com")
+    _sender(db_session, "printer@example.com", account)
+
+    _, master_cf = _render_config(db_session)
+
+    assert "rl_acct" not in master_cf
+    assert "smtp_destination_rate_delay" not in master_cf
 
 
 def test_dry_run_never_calls_the_control_surface(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

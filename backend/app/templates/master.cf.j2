@@ -56,6 +56,25 @@ smtp_implicit_tls unix  -       -       n       -       -       smtp
   -o syslog_name=postfix/$service_name
   -o smtp_tls_wrappermode=yes
   -o smtp_tls_security_level=encrypt
+{#- One synthetic transport per rate-limited upstream account (config_generator.py's
+   _rate_limited_account_transports) — paces deliveries via
+   smtp_destination_rate_delay instead of rejecting anything, so excess
+   mail just sits in Postfix's own queue until the next slot. concurrency
+   is pinned to 1 so the delay actually serializes throughput rather than
+   being trivially bypassed by parallel connections. Carries wrappermode
+   too when that account is also implicit-TLS, since a sender can only
+   route through one transport — see the smtp_implicit_tls comment above
+   for why plain implicit-TLS-only accounts don't need this at all. #}
+{% for t in rate_limited_accounts %}
+rl_acct{{ t.account_id }} unix  -       -       n       -       -       smtp
+  -o syslog_name=postfix/$service_name
+{%- if t.implicit_tls %}
+  -o smtp_tls_wrappermode=yes
+  -o smtp_tls_security_level=encrypt
+{%- endif %}
+  -o smtp_destination_rate_delay={{ t.rate_delay_seconds }}s
+  -o smtp_destination_concurrency_limit=1
+{% endfor -%}
 showq     unix  n       -       n       -       -       showq
 error     unix  -       -       n       -       -       error
 retry     unix  -       -       n       -       -       error
