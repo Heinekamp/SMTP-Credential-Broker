@@ -119,6 +119,8 @@ smtpd_recipient_restrictions =
     permit_sasl_authenticated
     reject_unauth_destination
 smtpd_helo_required = yes
+smtpd_end_of_data_restrictions =
+    check_policy_service inet:app:10030
 
 # ── Upstream (smtp client) TLS ──────────────────────────────────────
 smtp_tls_security_level = encrypt
@@ -196,6 +198,12 @@ relayhost =
 - **`smtp_sasl_password_maps`** — the credentials the outbound `smtp` client
   presents, looked up first by sender (because of
   `smtp_sender_dependent_authentication`), format `key  username:password`.
+- **`smtpd_end_of_data_restrictions = check_policy_service inet:app:10030`**
+  — asks `app`'s rate-limit policy listener (§10, security-model.md §10)
+  once per message, after the full `DATA` transaction rather than per
+  recipient. `10030` is `RELAY_POLICY_SERVICE_PORT`'s default
+  (configuration.md); nothing else in this file depends on that specific
+  number.
 
 ## 3. Generated `master.cf` (submission service)
 
@@ -228,8 +236,11 @@ The trailing `postlog unix-dgram ...` entry is required by Postfix 3.4+
 whenever `maillog_file` is set (§2) — without it, `postfix start` refuses to
 start at all with "missing 'postlog' service in master.cf." The full
 generated `master.cf` also includes Postfix's own standard service stanzas
-(`pickup`, `cleanup`, `qmgr`, `smtp` (outbound), `bounce`, etc.) unmodified —
-this document only shows the relay-specific portions.
+(`pickup`, `cleanup`, `qmgr`, `smtp` (outbound), `bounce`, etc.) unmodified,
+plus this relay's own generated transport clones — the shared
+`smtp_implicit_tls` service and, one per rate-limited upstream account, a
+`rl_acct{id}` service (§10) — this document only shows the relay-specific
+portions.
 
 ## 4. Generated lookup maps (source files, before `postmap`)
 
@@ -270,19 +281,30 @@ pay for."
 
 ```text
 printer@example.com    smtp_implicit_tls:
+alerts@example.com     rl_acct7:
 ```
 
-Only senders whose upstream account uses **implicit** TLS (a wrapped port
-like 465, as opposed to STARTTLS on 587) get an entry here — the empty
-nexthop after the colon means "use this transport, but still resolve the
-actual host:port from `sender_relayhost` above like everyone else." This
-routes them through the wrappermode-enabled `smtp_implicit_tls` transport
-clone in `master.cf` (§3) instead of the default `smtp` transport, which
-never sets `smtp_tls_wrappermode` and would otherwise fail against a
-wrapped port with "lost connection ... while receiving the initial server
-greeting" — Postfix waiting for a plaintext greeting a wrapped-TLS server
-will never send. STARTTLS senders are simply absent from this map and fall
-through to the default transport unaffected.
+A sender lands here for either of two reasons, and the two never overlap
+for the same account (§10):
+
+- Its upstream account uses **implicit** TLS (a wrapped port like 465, as
+  opposed to STARTTLS on 587) and has **no** rate limit set — routed
+  through the shared, wrappermode-enabled `smtp_implicit_tls` transport
+  clone in `master.cf` (§3).
+- Its upstream account has a rate limit set (implicit-TLS or not) —
+  routed through that account's own synthetic `rl_acct{id}` transport
+  (§10), which paces outbound delivery and also carries wrappermode
+  itself if that account needs it too.
+
+Either way the empty nexthop after the colon means "use this transport,
+but still resolve the actual host:port from `sender_relayhost` above like
+everyone else" — only the transport selection changes, never how the
+destination is found. Without `smtp_implicit_tls`/wrappermode, an
+implicit-TLS account fails with "lost connection ... while receiving the
+initial server greeting" — Postfix waiting for a plaintext greeting a
+wrapped-TLS server will never send. Senders needing neither treatment are
+simply absent from this map and fall through to the default `smtp`
+transport unaffected.
 
 Each source file is converted with `postmap lmdb:/etc/postfix/relay/<name>`
 into `<name>.lmdb`, which is what the running `main.cf` directives actually
@@ -360,6 +382,8 @@ authenticates with its own local SMTP user and is bound by that user's
 | Add/edit an upstream account or change which upstream a sender uses | `sender_relayhost` + `sasl_passwd` + `sender_transport` sources + `.lmdb`s | **None**, same reason. |
 | Rotate an upstream account's password | `sasl_passwd` source + `.lmdb` only | **None.** `sender_login` and `sender_relayhost` are untouched — this is why credential rotation never affects local users' credentials (spec §25's rotation test). |
 | Add/remove a local SMTP user | `sasldb2` entry (via `saslpasswd2`) + `sender_login` (if permissions changed too) | **None** for `sasldb2` — the SASL library reads it per-authentication-attempt, not cached at process start. |
+| Set/change/clear a local user's `rate_limit_per_hour` | Nothing Postfix-side at all — `main.cf`'s `check_policy_service` line never changes; only `app`'s own database row does | **None.** The policy listener (§10) reads the current limit fresh on every request; there is no Postfix config to regenerate. |
+| Set/change/clear an upstream account's `rate_limit_per_hour` | `sender_transport` source + `.lmdb`, and `master.cf`'s set of `rl_acct{id}` stanzas (§10) | `postfix stop` + `postfix start`, same as any other `master.cf`-level change (below) — a transport's delay/wrappermode options only take effect for a freshly started `smtp` delivery agent. |
 | Change `myhostname` or any other `main.cf`/`master.cf`-level change | Full `main.cf`/`master.cf` render | `postfix stop` + `postfix start` — see the note below on why this is a restart, not `postfix reload`. |
 | Install/replace the TLS certificate (Settings → TLS Certificate, or a manual mount) | `relay.crt`/`relay.key` only, via the separate `install_tls_certificate` op — `main.cf` is untouched | Same `postfix stop` + `postfix start` convention as any other live-file change, after verifying (via `openssl`) the new key actually matches the new cert and isn't already expired — a bad pair never replaces a working one. |
 
@@ -453,9 +477,13 @@ correlation lives anywhere other than the row an admin already wants to
 watch update live (`queued` → `sent`/`deferred`/`bounced`).
 
 A message rejected before ever being queued (`NOQUEUE: reject: ...` — the
-`smtpd_sender_login_maps`/`reject_sender_login_mismatch` case from §6/§8)
-gets a synthetic `REJECT-<random>` queue ID instead, since Postfix never
-assigns one to a message it never queued.
+`smtpd_sender_login_maps`/`reject_sender_login_mismatch` case from §6/§8,
+or a rate-limit policy defer from §10) gets a synthetic `REJECT-<random>`
+queue ID instead, since Postfix never assigns one to a message it never
+queued. When the rejected session had authenticated, Postfix appends
+`sasl_username=` to the same log line, which the parser also captures so
+the resulting `mail_log` row is attributed to the right local user instead
+of showing up anonymously.
 
 **A real bug this found**: a `master.cf` service whose name differs from
 its daemon — this project's `submission` service running the `smtpd`
@@ -478,3 +506,102 @@ respectively. All three are additional control-surface ops, run inside the
 sitting in the deferred queue, actively retrying on Postfix's own backoff
 schedule, with `mail_log` still only reflecting its most recent attempt's
 outcome.
+
+## 10. Sending rate limits
+
+Two independent protections, deliberately built on two different Postfix
+mechanisms rather than one shared one, because they solve different
+problems and neither's semantics fit the other's job:
+
+- **Per-local-user**: a ceiling on how much any one local credential can
+  send per hour, protecting a shared upstream mailbox from one
+  misbehaving or compromised local sender.
+- **Per-upstream-account**: paces how fast mail actually leaves toward a
+  given provider mailbox, protecting *that mailbox's own reputation* with
+  its provider, independent of which local users happen to be sending
+  through it.
+
+Both are configured per-entity (`LocalSmtpUser.rate_limit_per_hour` /
+`UpstreamAccount.rate_limit_per_hour`, `None` = unlimited) via the web UI
+— see [configuration.md](configuration.md)'s "Sending rate limits"
+section for the operator-facing knobs.
+
+### Per-local-user: a policy-delegation service, soft-rejecting
+
+Postfix's own anvil rate limiter (`smtpd_client_message_rate_limit`) keys
+on client *IP address*, not SASL identity — useless here, since multiple
+local users routinely share one IP (same LAN, same reverse proxy, same
+container network) and one user's traffic can arrive from more than one.
+What's actually needed is a decision keyed on identity #1 from §0
+(the authenticated SASL username), which anvil has no concept of.
+
+Postfix's policy delegation protocol (`SMTPD_POLICY_README`) is the
+supported mechanism for exactly this: a restriction that asks an external
+process for a verdict instead of consulting a static table. `app` runs
+that process itself — `core/rate_limit_policy.py`'s `run_policy_service`,
+a plain `asyncio` TCP listener started alongside the background ticks
+(see security-model.md §10 for the network/trust boundary this opens).
+`smtpd_end_of_data_restrictions` (§2) calls it once per message, after the
+full `DATA` transaction rather than per recipient, since the limit is
+about message count, not recipient count.
+
+On each request, `evaluate()` looks up the authenticated user's
+`rate_limit_per_hour`, and — if set — a `local_user_rate_limit_counters`
+row keyed by `(local_smtp_user_id, window_start)`, where `window_start` is
+the current clock hour truncated to `:00`. Under the limit, the counter
+increments and Postfix is told `action=DUNNO` (defer to the rest of the
+restriction chain, i.e. permit). At the limit, Postfix is told
+`action=DEFER <reason>` — a temporary (450) rejection — **without**
+incrementing the counter further, so a client that naively retries
+immediately doesn't dig itself in deeper. A window rolling over needs no
+explicit reset: the next hour's `window_start` simply doesn't have a row
+yet, so the count starts fresh at zero. `core/rate_limit_cleanup.py`'s
+tick (following `retention.py`'s exact shape) sweeps up rows once they're
+a few hours stale, purely for table hygiene — nothing ever reads an
+expired row, so this is never a correctness concern, only a cleanup one.
+
+Because the message is rejected at submission time, it is **never
+queued** — the submitting client is responsible for retrying, the same
+way any real-world submission-time rate limiter behaves. This is a
+deliberate contrast with the upstream-account mechanism below: a
+local-user rejection is a ceiling with teeth, not a queue.
+
+### Per-upstream-account: native transport pacing, no policy service
+
+The goal here is the opposite of a hard ceiling: *hold the excess mail in
+the queue and send it later*, never bounce the submitting client's send
+attempt. That behavior only exists for mail Postfix has **already
+accepted into its queue** — a policy-service reject at submission time
+(like the local-user case above) would produce the wrong outcome entirely,
+since a rejected message is never queued in the first place.
+
+The correct native mechanism is `smtp_destination_rate_delay` (a minimum
+delay Postfix's own queue manager enforces between successive deliveries
+to the same destination through a given transport) combined with
+`smtp_destination_concurrency_limit=1` — without pinning concurrency to
+1, multiple parallel delivery connections could each independently pace
+themselves at the configured delay, letting real throughput run at some
+multiple of the intended rate. `rate_limit_per_hour` is translated into a
+delay via `ceil(3600 / N)` seconds — a smoothing/pacing behavior, not an
+exact per-clock-hour bucket. Deliberately so: mail providers' own abuse
+heuristics generally key on burst rate more than raw hourly totals, so
+steady pacing is arguably the better fit for the stated goal ("avoid
+tripping the provider's spam protection") even though it isn't a literal
+"N per hour, then stop" guarantee.
+
+Since Postfix can only set delivery-agent parameters per **transport**,
+not per destination, a rate-limited account gets its own synthetic
+`rl_acct{id}` transport clone in `master.cf`, extending the exact
+mechanism #57 introduced for implicit-TLS accounts (§4) rather than
+replacing it — an account that's both implicit-TLS and rate-limited gets
+one transport carrying both option sets, since a sender can only route
+through one transport at a time. Accounts needing neither treatment keep
+using the default `smtp` transport, byte-for-byte unchanged from before
+this feature existed.
+
+The practical effect: a client submitting to this relay sees a normal,
+fast `250 Ok` — nothing about submission changes — while Postfix's own
+queue manager, on its own schedule, trickles the backlog out to the
+paced destination using its ordinary deferred-queue retry/backoff
+machinery. No new queue, no new polling loop, no application code in the
+delivery path at all.

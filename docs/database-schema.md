@@ -22,6 +22,8 @@ local_smtp_users ──1:N── mail_log (as sender-of-record)
 senders ──1:N── mail_log
 upstream_accounts ──1:N── mail_log
 
+local_smtp_users ──1:N── local_user_rate_limit_counters
+
 admin_users ──1:N── audit_log
 
 config_generations (standalone, references nothing — see §8)
@@ -74,6 +76,7 @@ One row per externally-hosted SMTP account (a STRATO mailbox, etc.).
 | `last_test_at` | timestamp, nullable | last "Test connection" run |
 | `last_test_result` | enum: `unknown`, `success`, `failure`, nullable | |
 | `last_test_error` | text, nullable | human-readable diagnostic only — never contains the password |
+| `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Paces outbound delivery via a synthetic per-account Postfix transport rather than rejecting anything — postfix-architecture.md §10. |
 | `created_at` / `updated_at` | timestamp | |
 
 `encrypted_password` is **never** included in any API response schema, at
@@ -105,6 +108,7 @@ Credentials issued to internal services (InvenTree, monitoring, printers...).
 | `enabled` | boolean, not null, default true | disabling removes the user from `sasldb2` on next generation, immediately revoking SMTP AUTH, without deleting history/permissions |
 | `created_at` | timestamp, not null | |
 | `password_last_rotated_at` | timestamp, nullable | |
+| `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Enforced by the rate-limit policy service (postfix-architecture.md §10, security-model.md §10) against §12's counter table, keyed on this user's `username` as the authenticated SASL identity. |
 
 ## 6. `user_sender_permissions`
 
@@ -217,7 +221,28 @@ operational state for the background scheduler, matching
 | `app_update_last_emailed_version` / `postfix_update_last_emailed_version` | text, nullable | Edge-trigger state — an update email fires once per newly-seen version, not on every poll. |
 | `app_update_acknowledged_version` / `postfix_update_acknowledged_version` | text, nullable | An admin-acknowledged *version*, not a plain dismissed flag — a newer release automatically reactivates the alert. |
 | `health_degraded_active` / `upstream_test_failure_active` | boolean, not null, default false | Last-seen state per alert kind, so email only fires on a resolved→active transition. |
+| `rate_limit_cleanup_last_run_at` | timestamp, nullable | Last time §12's stale counter rows were swept up (postfix-architecture.md §10). |
 | `updated_at` | timestamp, not null | |
+
+## 12. `local_user_rate_limit_counters`
+
+Backs the local-user rate-limit policy service's accept/defer decision
+(postfix-architecture.md §10, security-model.md §10) — the upstream-account
+side needs no equivalent table, since its pacing is native Postfix
+transport behavior with no counting of its own.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | |
+| `local_smtp_user_id` | FK → `local_smtp_users.id`, not null, `ON DELETE CASCADE` | |
+| `window_start` | timestamp, not null | The current hour, truncated to `:00` — a fixed window, not a sliding one. Unique together with `local_smtp_user_id`. |
+| `count` | integer, not null, default 0 | Messages permitted in this window so far. A rejected (over-limit) attempt does **not** increment this — retrying a legitimate send must never make things worse. |
+
+A window rolling over needs no explicit reset: the next hour's
+`window_start` simply has no row yet, so a fresh lookup starts at zero.
+Rows more than a few hours stale are inert (nothing ever reads them again)
+and are swept up by a daily background tick purely for table hygiene, not
+correctness.
 
 ## Notes on the one-sender-to-one-upstream default
 

@@ -47,6 +47,25 @@ right level of friction.
 | `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `relay_config` volume already wires this up correctly on both sides — only change this if you've renamed that volume's mount point. |
 | `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection" or config generation). |
 
+## Sending rate limits
+
+Not to be confused with the admin-login "Rate limiting" section above —
+this is about SMTP sending volume, covered in full in
+[postfix-architecture.md](postfix-architecture.md) §10 and
+[security-model.md](security-model.md) §10.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RELAY_POLICY_SERVICE_PORT` | `10030` | The internal-only TCP port `app` listens on for Postfix's policy-delegation protocol, enforcing each local user's rate limit. Reached via `inet:app:{port}` over the Compose network — never published to the host, and there's normally no reason to change it. |
+
+The limits themselves — per local user and per upstream account — are
+**not** environment variables; they're set per-entity from the Local SMTP
+Users and Upstream Accounts screens (blank/unset = unlimited, today's
+behavior). A local user over their limit gets a temporary rejection at
+send time; an upstream account over its limit is never rejected — its
+excess mail is simply paced out more slowly, still sitting safely in
+Postfix's own queue in the meantime.
+
 ## TLS certificates
 
 The relay ships with a self-signed placeholder certificate on the

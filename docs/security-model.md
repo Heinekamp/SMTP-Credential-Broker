@@ -222,3 +222,44 @@ bogus entry.
 | Compromised `app` container | Can view/change relay configuration and trigger config regeneration via the control surface (§6), but cannot read `sasldb2` or the materialized `sasl_passwd` file back out, and cannot obtain plaintext upstream passwords without also holding `ENCRYPTION_KEY` |
 | Stolen admin session token | Session is server-side revocable (manually via logout, or automatically for every *other* session on the same admin when its password or TOTP changes — the session making the change itself survives); token itself is hashed at rest; `Secure`/`HttpOnly`/`SameSite` cookie flags limit exfiltration paths. |
 | Brute-forced admin login | Rate limiting + lockout + optional TOTP. Lockout window caps at 15 minutes rather than escalating further — see [known-limitations.md](known-limitations.md). |
+
+## 10. The rate-limit policy listener
+
+§6 covers `app` reaching into `postfix`. The per-local-user sending rate
+limit (postfix-architecture.md §10) needs the opposite direction: `postfix`
+asks `app` a yes/no question for every message, via Postfix's own policy
+delegation protocol (`check_policy_service`,
+`smtpd_end_of_data_restrictions`). This is a second, genuinely new
+network-facing surface on the `app` container, so it's called out
+separately here rather than folded into §6.
+
+- **Reachability**: plain TCP, `inet:app:{RELAY_POLICY_SERVICE_PORT}`
+  (configuration.md), reachable only from other containers on the same
+  Compose network — never published to the host, and this project ships
+  no ingress that would expose it to a real network either.
+- **What crosses the wire**: the standard policy-protocol attribute set
+  (`sasl_username`, `sender`, `recipient`, etc.) in, a single
+  `action=DUNNO`/`action=DEFER ...` line out. No secret ever appears on
+  either side of this exchange — the response never carries a password,
+  a certificate, or a session token, only a permit/defer verdict and a
+  human-readable reason string a mail admin might see in a bounce.
+- **Trust boundary**: `sasl_username` is taken at face value from
+  whatever Postfix's `smtpd` sends. This is not a new trust assumption —
+  it's the same authenticated-SASL-identity fact (§0's identity #1 in
+  postfix-architecture.md) every other authorization decision in this
+  system already relies on; `smtpd` only ever populates that attribute
+  after a completed `AUTH`, so a client cannot forge someone else's
+  identity to escape their own rate limit any more than they could today
+  to escape `smtpd_sender_login_maps`.
+- **Failure mode**: an internal error while evaluating a request (a
+  bug, a database hiccup) fails **open** — the message is permitted, not
+  blocked — because a rate-limiter defect must never become a mail-outage
+  defect. This is the opposite failure direction from every credential
+  check elsewhere in this document, and is a deliberate choice specific
+  to this one listener: rate limiting is an abuse-mitigation feature, not
+  an authorization boundary, so availability wins the tradeoff here.
+- **Compromise of `postfix`**: could already reach every upstream
+  credential (§3) and forge arbitrary local mail — a false `action=DUNNO`
+  from a compromised `app` talking to a compromised `postfix` adds no
+  meaningfully new capability an attacker in either container doesn't
+  already have.
