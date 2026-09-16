@@ -52,6 +52,13 @@ smtpd_recipient_restrictions =
     permit_sasl_authenticated
     reject_unauth_destination
 smtpd_helo_required = yes
+# Enforces LocalSmtpUser.rate_limit_per_hour, keyed on sasl_username —
+# Postfix's own anvil limiter only keys on client IP, which can't tell
+# local users sharing one apart. Once per message (not per recipient),
+# hence end-of-data rather than the recipient restrictions above.
+# core/rate_limit_policy.py runs this inside the `app` container itself.
+smtpd_end_of_data_restrictions =
+    check_policy_service inet:app:{{ policy_service_port }}
 
 # ── Upstream (smtp client) TLS ──────────────────────────────────────
 smtp_tls_security_level = encrypt

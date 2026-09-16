@@ -30,6 +30,7 @@ from app.core.acme_tls import sync_certificate_to_postfix
 from app.core.alert_email import alert_email_tick
 from app.core.cert_renewal import cert_renewal_tick
 from app.core.logging_config import configure_logging
+from app.core.rate_limit_policy import run_policy_service
 from app.core.request_context import set_request_id
 from app.core.retention import retention_cleanup_tick
 from app.core.scheduled_tests import connection_test_tick
@@ -72,6 +73,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             asyncio.create_task(run_periodic("alert_email", _POLL_SECONDS, alert_email_tick)),
             asyncio.create_task(run_periodic("retention_cleanup", _POLL_SECONDS, retention_cleanup_tick)),
             asyncio.create_task(run_periodic("cert_renewal", _POLL_SECONDS, cert_renewal_tick)),
+            # Not a periodic tick — a long-lived listener Postfix connects
+            # to for every message (core/rate_limit_policy.py). Cancelled
+            # and awaited on shutdown the same as the ticks above.
+            asyncio.create_task(run_policy_service(get_settings().policy_service_port)),
         ]
     yield
     for task in tasks:

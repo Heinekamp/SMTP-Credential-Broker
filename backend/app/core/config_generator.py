@@ -80,7 +80,9 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
 def _render_config() -> tuple[str, str]:
     settings = get_settings()
     main_cf = _ENV.get_template("main.cf.j2").render(
-        myhostname=settings.submission_host, mydomain=settings.submission_host
+        myhostname=settings.submission_host,
+        mydomain=settings.submission_host,
+        policy_service_port=settings.policy_service_port,
     )
     master_cf = _ENV.get_template("master.cf.j2").render()
     return main_cf, master_cf

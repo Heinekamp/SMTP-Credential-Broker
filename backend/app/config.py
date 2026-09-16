@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     # against staging (core/acme_tls.py).
     acme_directory_url: str = "https://acme-v02.api.letsencrypt.org/directory"
 
+    # Internal-only TCP port for the local-user rate-limit policy service
+    # (core/rate_limit_policy.py) — Postfix reaches it via
+    # `check_policy_service = inet:app:{port}` over the Compose network,
+    # never published to the host.
+    policy_service_port: int = 10030
+
 
 @lru_cache
 def get_settings() -> Settings:
