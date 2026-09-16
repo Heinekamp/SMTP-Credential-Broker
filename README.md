@@ -27,16 +27,38 @@ visible to anything but this relay.
   per internal service, each restricted to a set of admin-approved sender
   addresses (enforced by Postfix's own `sender_dependent_relayhost_maps` /
   `smtpd_sender_login_maps`, not just application-layer trust).
-- **A real admin console** — dashboard, mail log, live Postfix queue
-  management, config generation history, all backed by a REST API.
-- **Security-conscious by default** — TOTP two-factor login, session-based
-  auth with CSRF protection, Argon2id password hashing, rate-limited login
-  attempts, and a full audit log of every administrative action.
+- **Sending rate limits** — an optional per-hour ceiling and burst-bucket
+  smoothing for local users, plus per-account outbound pacing for upstream
+  accounts. A local user stuck in an unbroken run of rejections always
+  surfaces on the notification bell, with an opt-in alert email and an
+  opt-in automatic disable for a genuinely runaway sender.
+- **Automatic TLS via Let's Encrypt** — DNS-01 issuance and renewal
+  (Cloudflare) for the submission port, replacing the default self-signed
+  placeholder certificate. No inbound port 80/443 needed.
+- **Alerting & monitoring** — an in-app notification bell plus optional
+  email alerts for relay degradation, failing upstream accounts, rate-limit
+  abuse, and available app/Postfix updates, backed by scheduled connection
+  testing and a background update checker.
+- **A real admin console** — dashboard, a searchable/paginated mail log,
+  live Postfix queue management, a full audit log, read-only CSV export,
+  and config generation history, all backed by a REST API.
+- **Visual customization** — light/dark/system theme (a personal,
+  per-browser preference), plus an admin-configurable accent color, custom
+  logo, and matching favicon for the whole deployment.
+- **Security-conscious by default** — TOTP two-factor login (with QR
+  enrollment) and session-based auth with CSRF protection, Argon2id
+  password hashing, rate-limited login attempts, admin
+  deactivation/reactivation, break-glass CLI recovery for a forgotten
+  password or lost authenticator, and a full audit log of every
+  administrative action.
+- **Configurable data retention** — Mail Log and Audit Log can auto-delete
+  rows past a chosen age; off by default.
 - **Self-contained deployment** — two Docker Compose services (`app` +
   `postfix`), SQLite by default (swappable for Postgres), health checks, and
   a tested backup/restore procedure.
-- **CLI for the essentials** — bootstrap an admin, rotate the encryption key,
-  regenerate config, or inspect the queue without needing the web UI.
+- **CLI for the essentials** — bootstrap an admin, recover a locked-out
+  account, rotate the encryption key, regenerate config, or inspect the
+  queue without needing the web UI.
 
 ## Screenshots
 
