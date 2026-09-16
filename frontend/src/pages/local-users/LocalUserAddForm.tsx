@@ -23,6 +23,7 @@ export function LocalUserAddForm() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [usernameTouched, setUsernameTouched] = useState(false);
+  const [rateLimitPerHour, setRateLimitPerHour] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function handleNameChange(value: string) {
@@ -31,7 +32,8 @@ export function LocalUserAddForm() {
   }
 
   const create = useMutation({
-    mutationFn: () => createLocalUser(name, username),
+    mutationFn: () =>
+      createLocalUser(name, username, rateLimitPerHour.trim() === "" ? null : Number(rateLimitPerHour)),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["local-users"] });
       navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
@@ -70,6 +72,21 @@ export function LocalUserAddForm() {
         />
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
           Auto-suggested from the name — edit if you'd like something different.
+        </p>
+
+        <label style={labelStyle} htmlFor="lu-rate-limit">Rate Limit (messages/hour)</label>
+        <TextInput
+          id="lu-rate-limit"
+          type="number"
+          min={1}
+          placeholder="Unlimited"
+          value={rateLimitPerHour}
+          onChange={(e) => setRateLimitPerHour(e.target.value)}
+          style={fieldStyle}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
+          Blank means unlimited. Over the limit, sends are rejected until the current hour ends — protects a shared
+          upstream mailbox from one misbehaving credential.
         </p>
 
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>

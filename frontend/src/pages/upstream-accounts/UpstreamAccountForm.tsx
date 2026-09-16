@@ -35,6 +35,7 @@ export function UpstreamAccountForm() {
   const [tlsMode, setTlsMode] = useState<TlsMode>("starttls");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rateLimitPerHour, setRateLimitPerHour] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function UpstreamAccountForm() {
       setPort(String(existing.port));
       setTlsMode(existing.tls_mode);
       setUsername(existing.username);
+      setRateLimitPerHour(existing.rate_limit_per_hour === null ? "" : String(existing.rate_limit_per_hour));
     }
   }, [existing]);
 
@@ -55,6 +57,7 @@ export function UpstreamAccountForm() {
         port: Number(port),
         tls_mode: tlsMode,
         username,
+        rate_limit_per_hour: rateLimitPerHour.trim() === "" ? null : Number(rateLimitPerHour),
         ...(password ? { password } : {}),
       };
       return isEdit ? updateUpstreamAccount(accountId!, input) : createUpstreamAccount({ ...input, password });
@@ -132,6 +135,22 @@ export function UpstreamAccountForm() {
             This field is write-only and never shows the stored password. Leave blank to keep the current password.
           </p>
         )}
+
+        <label style={labelStyle} htmlFor="ua-rate-limit">Rate Limit (messages/hour)</label>
+        <TextInput
+          id="ua-rate-limit"
+          type="number"
+          min={1}
+          placeholder="Unlimited"
+          value={rateLimitPerHour}
+          onChange={(e) => setRateLimitPerHour(e.target.value)}
+          style={fieldStyle}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
+          Blank means unlimited. Paces outbound delivery to this provider rather than rejecting anything — excess
+          mail sits in the queue and goes out once the pace allows it, protecting this mailbox's reputation.
+          {isEdit && existing && ` Sent in the last hour: ${existing.sent_this_hour}.`}
+        </p>
 
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <Button type="submit" variant="accent" disabled={save.isPending}>

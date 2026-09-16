@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Card, Switch } from "../../design-system/components";
+import { Button, Card, Switch, TextInput } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { ApiError } from "../../lib/apiClient";
@@ -17,6 +17,55 @@ import {
 } from "../../lib/api/localUsers";
 
 const QUERY_KEY = ["local-users"];
+
+// Directly editable in place, like the enabled Switch column next to it —
+// there's no separate edit page for local users, only Add.
+function RateLimitCell({
+  user,
+  onSave,
+  saving,
+}: {
+  user: LocalUser;
+  onSave: (value: number | null) => void;
+  saving: boolean;
+}) {
+  const [value, setValue] = useState(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
+
+  useEffect(() => {
+    setValue(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
+  }, [user.rate_limit_per_hour]);
+
+  function commit() {
+    const trimmed = value.trim();
+    const parsed = trimmed === "" ? null : Number(trimmed);
+    if (parsed === user.rate_limit_per_hour) return;
+    if (parsed !== null && (!Number.isInteger(parsed) || parsed < 1)) {
+      setValue(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
+      return;
+    }
+    onSave(parsed);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <TextInput
+        type="number"
+        min={1}
+        placeholder="Unlimited"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        disabled={saving}
+        style={{ width: 90 }}
+      />
+      {user.rate_limit_per_hour !== null && (
+        <span style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)" }}>
+          {user.sent_this_hour}/{user.rate_limit_per_hour} this hour
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function LocalUsersList() {
   const navigate = useNavigate();
@@ -46,6 +95,12 @@ export function LocalUsersList() {
       }
     },
     onError: (err) => setDisableError(errorMessage(err, "Could not change this user's status.")),
+  });
+
+  const updateRateLimit = useMutation({
+    mutationFn: ({ id, rate_limit_per_hour }: { id: number; rate_limit_per_hour: number | null }) =>
+      updateLocalUser(id, { rate_limit_per_hour }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
   });
 
   const regenerate = useMutation({
@@ -122,7 +177,7 @@ export function LocalUsersList() {
         <table style={tableStyle}>
           <thead>
             <tr>
-              {["Name", "Username", "Status", "Password Changed", "Allowed Senders", "Actions"].map((label) => (
+              {["Name", "Username", "Status", "Password Changed", "Allowed Senders", "Rate Limit", "Actions"].map((label) => (
                 <th key={label} style={thStyle}>
                   {label}
                 </th>
@@ -160,6 +215,13 @@ export function LocalUsersList() {
                   >
                     {user.allowed_sender_count} allowed
                   </button>
+                </td>
+                <td style={tdStyle}>
+                  <RateLimitCell
+                    user={user}
+                    saving={updateRateLimit.isPending}
+                    onSave={(rate_limit_per_hour) => updateRateLimit.mutate({ id: user.id, rate_limit_per_hour })}
+                  />
                 </td>
                 <td style={tdStyle}>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

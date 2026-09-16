@@ -8,6 +8,10 @@ export interface LocalUser {
   created_at: string;
   password_last_rotated_at: string | null;
   allowed_sender_count: number;
+  /** null = unlimited. */
+  rate_limit_per_hour: number | null;
+  /** How many messages this user has sent in the current hourly window. */
+  sent_this_hour: number;
 }
 
 export interface LocalUserCreateResponse {
@@ -51,13 +55,20 @@ export function getLocalUser(id: number): Promise<LocalUser> {
   return apiFetch<LocalUser>(`/api/local-users/${id}`);
 }
 
-export function createLocalUser(name: string, username: string): Promise<LocalUserCreateResponse> {
-  return apiFetch<LocalUserCreateResponse>("/api/local-users", { method: "POST", body: JSON.stringify({ name, username }) });
+export function createLocalUser(
+  name: string,
+  username: string,
+  rateLimitPerHour?: number | null,
+): Promise<LocalUserCreateResponse> {
+  return apiFetch<LocalUserCreateResponse>("/api/local-users", {
+    method: "POST",
+    body: JSON.stringify({ name, username, rate_limit_per_hour: rateLimitPerHour ?? null }),
+  });
 }
 
 export function updateLocalUser(
   id: number,
-  input: { name?: string; enabled?: boolean },
+  input: { name?: string; enabled?: boolean; rate_limit_per_hour?: number | null },
 ): Promise<LocalUserUpdateResponse> {
   return apiFetch<LocalUserUpdateResponse>(`/api/local-users/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }

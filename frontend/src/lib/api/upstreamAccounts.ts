@@ -16,6 +16,11 @@ export interface UpstreamAccount {
   last_test_error: string | null;
   created_at: string;
   updated_at: string;
+  /** null = unlimited. */
+  rate_limit_per_hour: number | null;
+  /** A real delivery count over the last hour (mail_log), not the pacing
+   * computation itself. */
+  sent_this_hour: number;
 }
 
 export interface UpstreamAccountInput {
@@ -28,6 +33,8 @@ export interface UpstreamAccountInput {
    * write-only field contract (design handoff §5). */
   password?: string;
   enabled?: boolean;
+  /** null = unlimited. */
+  rate_limit_per_hour?: number | null;
 }
 
 export interface DeletePrecheck {

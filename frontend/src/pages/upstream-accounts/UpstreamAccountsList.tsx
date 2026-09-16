@@ -30,6 +30,12 @@ function lastTestLabel(account: UpstreamAccount): { status: "idle" | "fault" | "
     : { status: "fault", label: "Failed" };
 }
 
+function rateLimitLabel(account: UpstreamAccount): string {
+  return account.rate_limit_per_hour === null
+    ? "Unlimited"
+    : `${account.sent_this_hour}/${account.rate_limit_per_hour} this hour`;
+}
+
 export function UpstreamAccountsList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -113,7 +119,7 @@ export function UpstreamAccountsList() {
         <table style={tableStyle}>
           <thead>
             <tr>
-              {["Name", "Host", "TLS Mode", "Status", "Last Test", "Actions"].map((label) => (
+              {["Name", "Host", "TLS Mode", "Status", "Last Test", "Rate Limit", "Actions"].map((label) => (
                 <th key={label} style={thStyle}>
                   {label}
                 </th>
@@ -148,6 +154,7 @@ export function UpstreamAccountsList() {
                       </div>
                     )}
                   </td>
+                  <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{rateLimitLabel(account)}</td>
                   <td style={tdStyle}>
                     <div style={{ display: "flex", gap: 6 }}>
                       <Button variant="default" onClick={() => navigate(`/upstream-accounts/${account.id}/edit`)}>
