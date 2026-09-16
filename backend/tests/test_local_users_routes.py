@@ -195,6 +195,73 @@ def test_update_sets_and_clears_the_rate_limit(
     assert db_session.get(LocalSmtpUser, user_id).rate_limit_per_hour is None
 
 
+def test_create_accepts_a_burst_limit_alongside_an_hourly_one(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_per_hour": 3600, "rate_limit_burst": 5},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 201
+    body = response.json()["user"]
+    assert body["rate_limit_burst"] == 5
+    assert body["burst_tokens_available"] == 5
+
+
+def test_create_rejects_a_burst_limit_without_an_hourly_limit(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    response = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_burst": 5},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+    assert fake_postfix_control == []
+
+
+def test_update_rejects_clearing_the_hourly_limit_while_a_burst_limit_remains(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service", "rate_limit_per_hour": 3600, "rate_limit_burst": 5},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}", json={"rate_limit_per_hour": None}, headers=csrf_headers(admin_client)
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_can_set_both_limits_together(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    created = admin_client.post(
+        "/api/local-users",
+        json={"name": "Printer", "username": "printer-service"},
+        headers=csrf_headers(admin_client),
+    ).json()
+    user_id = created["user"]["id"]
+
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}",
+        json={"rate_limit_per_hour": 3600, "rate_limit_burst": 5},
+        headers=csrf_headers(admin_client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["rate_limit_burst"] == 5
+    db_session.expire_all()
+    row = db_session.get(LocalSmtpUser, user_id)
+    assert row.rate_limit_per_hour == 3600
+    assert row.rate_limit_burst == 5
+
+
 def test_sent_this_hour_reflects_the_current_window_counter(
     admin_client: TestClient, db_session: Session, fake_postfix_control: list
 ) -> None:

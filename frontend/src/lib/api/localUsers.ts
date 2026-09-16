@@ -12,6 +12,11 @@ export interface LocalUser {
   rate_limit_per_hour: number | null;
   /** How many messages this user has sent in the current hourly window. */
   sent_this_hour: number;
+  /** null = no burst protection. Only meaningful when rate_limit_per_hour
+   * is also set — its refill rate is always derived from that field. */
+  rate_limit_burst: number | null;
+  /** Burst tokens currently available, or null when rate_limit_burst isn't set. */
+  burst_tokens_available: number | null;
 }
 
 export interface LocalUserCreateResponse {
@@ -59,16 +64,22 @@ export function createLocalUser(
   name: string,
   username: string,
   rateLimitPerHour?: number | null,
+  rateLimitBurst?: number | null,
 ): Promise<LocalUserCreateResponse> {
   return apiFetch<LocalUserCreateResponse>("/api/local-users", {
     method: "POST",
-    body: JSON.stringify({ name, username, rate_limit_per_hour: rateLimitPerHour ?? null }),
+    body: JSON.stringify({
+      name,
+      username,
+      rate_limit_per_hour: rateLimitPerHour ?? null,
+      rate_limit_burst: rateLimitBurst ?? null,
+    }),
   });
 }
 
 export function updateLocalUser(
   id: number,
-  input: { name?: string; enabled?: boolean; rate_limit_per_hour?: number | null },
+  input: { name?: string; enabled?: boolean; rate_limit_per_hour?: number | null; rate_limit_burst?: number | null },
 ): Promise<LocalUserUpdateResponse> {
   return apiFetch<LocalUserUpdateResponse>(`/api/local-users/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }

@@ -24,6 +24,7 @@ export function LocalUserAddForm() {
   const [username, setUsername] = useState("");
   const [usernameTouched, setUsernameTouched] = useState(false);
   const [rateLimitPerHour, setRateLimitPerHour] = useState("");
+  const [rateLimitBurst, setRateLimitBurst] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function handleNameChange(value: string) {
@@ -32,8 +33,14 @@ export function LocalUserAddForm() {
   }
 
   const create = useMutation({
-    mutationFn: () =>
-      createLocalUser(name, username, rateLimitPerHour.trim() === "" ? null : Number(rateLimitPerHour)),
+    mutationFn: () => {
+      const hourly = rateLimitPerHour.trim() === "" ? null : Number(rateLimitPerHour);
+      // A burst value only means something alongside an hourly limit —
+      // clearing the hourly field silently drops any burst value too,
+      // rather than submitting a combination the API would reject.
+      const burst = hourly === null || rateLimitBurst.trim() === "" ? null : Number(rateLimitBurst);
+      return createLocalUser(name, username, hourly, burst);
+    },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["local-users"] });
       navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
@@ -87,6 +94,23 @@ export function LocalUserAddForm() {
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
           Blank means unlimited. Over the limit, sends are rejected until the current hour ends — protects a shared
           upstream mailbox from one misbehaving credential.
+        </p>
+
+        <label style={labelStyle} htmlFor="lu-rate-limit-burst">Burst Limit (messages in a row)</label>
+        <TextInput
+          id="lu-rate-limit-burst"
+          type="number"
+          min={1}
+          placeholder="No burst protection"
+          value={rateLimitBurst}
+          onChange={(e) => setRateLimitBurst(e.target.value)}
+          style={fieldStyle}
+          disabled={rateLimitPerHour.trim() === ""}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
+          {rateLimitPerHour.trim() === ""
+            ? "Requires a rate limit above — it paces how fast that limit can be reached, so a haywire credential is throttled within seconds instead of only once the whole hour's quota is gone."
+            : "Blank means no extra protection beyond the hourly limit above. Once this many messages go out back-to-back, further sends are throttled — and gradually allowed again — at the pace the hourly limit implies."}
         </p>
 
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>

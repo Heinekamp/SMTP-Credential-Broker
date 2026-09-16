@@ -23,6 +23,7 @@ senders ──1:N── mail_log
 upstream_accounts ──1:N── mail_log
 
 local_smtp_users ──1:N── local_user_rate_limit_counters
+local_smtp_users ──1:1── local_user_burst_buckets
 
 admin_users ──1:N── audit_log
 
@@ -109,6 +110,7 @@ Credentials issued to internal services (InvenTree, monitoring, printers...).
 | `created_at` | timestamp, not null | |
 | `password_last_rotated_at` | timestamp, nullable | |
 | `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Enforced by the rate-limit policy service (postfix-architecture.md §10, security-model.md §10) against §12's counter table, keyed on this user's `username` as the authenticated SASL identity. |
+| `rate_limit_burst` | integer, nullable | `null` = no burst protection (default). Only accepted, and only enforced, alongside `rate_limit_per_hour` — its refill rate is always derived from that field (postfix-architecture.md §10's burst-protection subsection). Backed by §13's token-bucket table. |
 
 ## 6. `user_sender_permissions`
 
@@ -243,6 +245,23 @@ A window rolling over needs no explicit reset: the next hour's
 Rows more than a few hours stale are inert (nothing ever reads them again)
 and are swept up by a daily background tick purely for table hygiene, not
 correctness.
+
+## 13. `local_user_burst_buckets`
+
+Backs the burst-protection token bucket (postfix-architecture.md §10's
+burst-protection subsection) — independent of, and checked in addition
+to, §12's hourly counter. Unlike that table, this one never grows: it's
+a single row per user, continuously refilled and spent in place, so
+`local_smtp_user_id` is the primary key itself rather than a surrogate
+`id` with a unique constraint, and there's no cleanup tick for it — the
+row simply disappears via the same cascade delete as everything else
+keyed off a local user.
+
+| Column | Type | Notes |
+|---|---|---|
+| `local_smtp_user_id` | FK → `local_smtp_users.id`, PK, `ON DELETE CASCADE` | |
+| `tokens` | float, not null | Available tokens right now, as of `last_refill_at` — capped at `rate_limit_burst`, decremented by 1 on every permitted message. |
+| `last_refill_at` | timestamp, not null | The clock reference the next refill computation measures elapsed time from. Updated on **every** check, including a deferred one — a rejected message must not lose refill progress any more than it should get to spend a token it never used. |
 
 ## Notes on the one-sender-to-one-upstream default
 

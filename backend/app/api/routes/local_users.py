@@ -9,7 +9,7 @@ from app.core.clock import utcnow
 from app.core.password_generation import generate_password
 from app.core.permissions import grant_permission, revoke_permission
 from app.core.postfix_control import PostfixControlError
-from app.core.rate_limit_policy import current_usage
+from app.core.rate_limit_policy import current_burst_tokens, current_usage
 from app.core.security import hash_password
 from app.models.admin import AdminUser
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
@@ -44,6 +44,9 @@ def _allowed_sender_count(db: Session, user_id: int) -> int:
 
 
 def _to_read(db: Session, user: LocalSmtpUser) -> LocalUserRead:
+    burst_tokens_available = None
+    if user.rate_limit_burst is not None and user.rate_limit_per_hour is not None:
+        burst_tokens_available = int(current_burst_tokens(db, user.id, user.rate_limit_burst, user.rate_limit_per_hour))
     return LocalUserRead(
         id=user.id,
         name=user.name,
@@ -53,8 +56,22 @@ def _to_read(db: Session, user: LocalSmtpUser) -> LocalUserRead:
         password_last_rotated_at=user.password_last_rotated_at,
         allowed_sender_count=_allowed_sender_count(db, user.id),
         rate_limit_per_hour=user.rate_limit_per_hour,
+        rate_limit_burst=user.rate_limit_burst,
         sent_this_hour=current_usage(db, user.id),
+        burst_tokens_available=burst_tokens_available,
     )
+
+
+def _validate_rate_limits(*, rate_limit_per_hour: int | None, rate_limit_burst: int | None) -> None:
+    """rate_limit_burst's refill rate is always derived from
+    rate_limit_per_hour (core/rate_limit_policy.py) — never a second
+    independent rate an admin has to keep in sync by hand — so it's
+    meaningless, and rejected, without an hourly limit also in effect."""
+    if rate_limit_burst is not None and rate_limit_per_hour is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "rate_limit_burst requires rate_limit_per_hour to also be set.",
+        )
 
 
 def _set_sasl_or_503(username: str, password: str) -> None:
@@ -91,6 +108,7 @@ def create_user(
 ) -> LocalUserCreateResponse:
     if db.query(LocalSmtpUser).filter(LocalSmtpUser.username == payload.username).one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already in use")
+    _validate_rate_limits(rate_limit_per_hour=payload.rate_limit_per_hour, rate_limit_burst=payload.rate_limit_burst)
 
     password = generate_password()
     user = LocalSmtpUser(
@@ -99,6 +117,7 @@ def create_user(
         password_hash=hash_password(password),
         password_last_rotated_at=utcnow(),
         rate_limit_per_hour=payload.rate_limit_per_hour,
+        rate_limit_burst=payload.rate_limit_burst,
     )
     db.add(user)
     db.flush()  # surfaces DB-level errors before the external sasldb2 call
@@ -176,8 +195,12 @@ def update_user(
     if "name" in data and data["name"] is not None:
         user.name = data["name"]
 
-    if "rate_limit_per_hour" in data:
-        user.rate_limit_per_hour = data["rate_limit_per_hour"]
+    if "rate_limit_per_hour" in data or "rate_limit_burst" in data:
+        effective_hourly = data.get("rate_limit_per_hour", user.rate_limit_per_hour)
+        effective_burst = data.get("rate_limit_burst", user.rate_limit_burst)
+        _validate_rate_limits(rate_limit_per_hour=effective_hourly, rate_limit_burst=effective_burst)
+        user.rate_limit_per_hour = effective_hourly
+        user.rate_limit_burst = effective_burst
 
     record_audit(
         db,

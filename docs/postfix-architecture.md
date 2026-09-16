@@ -566,6 +566,29 @@ way any real-world submission-time rate limiter behaves. This is a
 deliberate contrast with the upstream-account mechanism below: a
 local-user rejection is a ceiling with teeth, not a queue.
 
+**Burst protection.** The hourly counter alone has a real gap: it only
+bites once the *entire* hourly budget is gone, so a haywire credential
+can burn all of it in the first few seconds of the hour with no
+resistance at all. `evaluate()` also checks a second, independent
+mechanism — a token bucket (`LocalUserBurstBucket`, capacity
+`rate_limit_burst`) — before permitting a message; both checks must pass.
+A fixed *second* window ("N per minute", mirroring the hourly counter
+exactly) was considered and rejected: two fixed windows that don't know
+about each other let a burst at the end of one plus a burst at the start
+of the next add up to ~2x the per-window limit in a couple of seconds. A
+token bucket has no such boundary — it refills continuously (at
+`rate_limit_per_hour / 3600` tokens/sec, so there is never a second
+independent rate to configure, only a burst capacity) rather than resetting
+at fixed instants, so it smooths bursts by construction instead of merely
+capping a period total. The bucket starts **full** (an idle/fresh user
+isn't throttled on their first messages), and its refill progress is
+persisted even when a message is deferred by *either* check — a rejected
+attempt must never lose refill progress any more than it should get to
+spend a token it never used. `rate_limit_burst` is only accepted (and
+only takes effect) alongside a `rate_limit_per_hour`, since its refill
+rate is derived from it; there is deliberately no independent knob for
+"how fast" a burst refills.
+
 ### Per-upstream-account: native transport pacing, no policy service
 
 The goal here is the opposite of a hard ceiling: *hold the excess mail in

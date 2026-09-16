@@ -19,12 +19,18 @@ class LocalUserCreate(BaseModel):
     # None = unlimited (today's behavior) — enforced by
     # core/rate_limit_policy.py, not set here at creation time by default.
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
+    # None = no burst protection. Only meaningful (and only accepted —
+    # see the route's validation) when rate_limit_per_hour is also set,
+    # since its refill rate is always derived from that field rather than
+    # being a second independent rate.
+    rate_limit_burst: int | None = Field(default=None, ge=1)
 
 
 class LocalUserUpdate(BaseModel):
     name: str | None = None
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
+    rate_limit_burst: int | None = Field(default=None, ge=1)
 
 
 class LocalUserRead(BaseModel):
@@ -38,10 +44,14 @@ class LocalUserRead(BaseModel):
     password_last_rotated_at: datetime.datetime | None
     allowed_sender_count: int
     rate_limit_per_hour: int | None
+    rate_limit_burst: int | None
     # How many messages this user has sent in the current hourly window —
     # the exact bucket core/rate_limit_policy.py itself checks against,
     # read-only (never itself a knob).
     sent_this_hour: int
+    # Burst tokens currently available (rounded down), or null when
+    # rate_limit_burst isn't set — read-only, mirrors sent_this_hour.
+    burst_tokens_available: int | None
     # password / password_hash intentionally absent — see local_user.py's
     # model comment and security-model.md §5.
 

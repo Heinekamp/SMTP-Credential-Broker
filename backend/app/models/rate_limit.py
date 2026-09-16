@@ -29,3 +29,21 @@ class LocalUserRateLimitCounter(Base):
     )
     window_start: Mapped[datetime.datetime] = mapped_column(nullable=False)
     count: Mapped[int] = mapped_column(default=0, nullable=False)
+
+
+class LocalUserBurstBucket(Base):
+    """One row per local user, updated in place forever — a token bucket
+    backing the burst-protection check in core/rate_limit_policy.py,
+    independent of and in addition to LocalUserRateLimitCounter above.
+    Unlike that per-window counter, this never grows (no cleanup tick
+    needed): `local_smtp_user_id` is the primary key itself, since the
+    relationship is genuinely 1:1, and the row disappears via the same
+    cascade delete as everything else keyed off a local user."""
+
+    __tablename__ = "local_user_burst_buckets"
+
+    local_smtp_user_id: Mapped[int] = mapped_column(
+        ForeignKey("local_smtp_users.id", ondelete="CASCADE"), primary_key=True
+    )
+    tokens: Mapped[float] = mapped_column(nullable=False)
+    last_refill_at: Mapped[datetime.datetime] = mapped_column(nullable=False)

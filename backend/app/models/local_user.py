@@ -32,6 +32,13 @@ class LocalSmtpUser(Base):
     # (core/rate_limit_policy.py), not Postfix's own anvil limiter, which
     # only keys on client IP and can't distinguish local users sharing one.
     rate_limit_per_hour: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    # None = no burst protection (today's behavior). The bucket's capacity
+    # — refill rate is always derived from rate_limit_per_hour, never a
+    # second independent rate an admin has to keep in sync by hand
+    # (core/rate_limit_policy.py). Only meaningful, and only enforced,
+    # when rate_limit_per_hour is also set — see schemas/local_user.py's
+    # cross-field validation.
+    rate_limit_burst: Mapped[int | None] = mapped_column(nullable=True, default=None)
 
     # passive_deletes=True: see the identical comment on Sender.permissions
     # (sender.py) — user_sender_permissions.local_smtp_user_id is part of

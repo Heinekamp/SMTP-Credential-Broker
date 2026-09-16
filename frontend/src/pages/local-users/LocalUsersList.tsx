@@ -18,51 +18,95 @@ import {
 
 const QUERY_KEY = ["local-users"];
 
-// Directly editable in place, like the enabled Switch column next to it —
-// there's no separate edit page for local users, only Add.
-function RateLimitCell({
-  user,
-  onSave,
+// A single numeric field bound to one of LocalUser's rate-limit values,
+// editable in place like the enabled Switch column next to it — there's
+// no separate edit page for local users, only Add.
+function InlineNumberField({
+  currentValue,
+  placeholder,
+  disabled,
   saving,
+  onSave,
 }: {
-  user: LocalUser;
-  onSave: (value: number | null) => void;
+  currentValue: number | null;
+  placeholder: string;
+  disabled?: boolean;
   saving: boolean;
+  onSave: (value: number | null) => void;
 }) {
-  const [value, setValue] = useState(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
+  const [value, setValue] = useState(currentValue === null ? "" : String(currentValue));
 
   useEffect(() => {
-    setValue(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
-  }, [user.rate_limit_per_hour]);
+    setValue(currentValue === null ? "" : String(currentValue));
+  }, [currentValue]);
 
   function commit() {
     const trimmed = value.trim();
     const parsed = trimmed === "" ? null : Number(trimmed);
-    if (parsed === user.rate_limit_per_hour) return;
+    if (parsed === currentValue) return;
     if (parsed !== null && (!Number.isInteger(parsed) || parsed < 1)) {
-      setValue(user.rate_limit_per_hour === null ? "" : String(user.rate_limit_per_hour));
+      setValue(currentValue === null ? "" : String(currentValue));
       return;
     }
     onSave(parsed);
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <TextInput
-        type="number"
-        min={1}
-        placeholder="Unlimited"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={commit}
-        disabled={saving}
-        style={{ width: 90 }}
-      />
-      {user.rate_limit_per_hour !== null && (
-        <span style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)" }}>
-          {user.sent_this_hour}/{user.rate_limit_per_hour} this hour
-        </span>
-      )}
+    <TextInput
+      type="number"
+      min={1}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      disabled={disabled || saving}
+      style={{ width: 90 }}
+    />
+  );
+}
+
+function RateLimitCell({
+  user,
+  onSaveHourly,
+  onSaveBurst,
+  savingHourly,
+  savingBurst,
+}: {
+  user: LocalUser;
+  onSaveHourly: (value: number | null) => void;
+  onSaveBurst: (value: number | null) => void;
+  savingHourly: boolean;
+  savingBurst: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div>
+        <InlineNumberField
+          currentValue={user.rate_limit_per_hour}
+          placeholder="Unlimited"
+          saving={savingHourly}
+          onSave={onSaveHourly}
+        />
+        {user.rate_limit_per_hour !== null && (
+          <div style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)" }}>
+            {user.sent_this_hour}/{user.rate_limit_per_hour} this hour
+          </div>
+        )}
+      </div>
+      <div>
+        <InlineNumberField
+          currentValue={user.rate_limit_burst}
+          placeholder="No burst limit"
+          disabled={user.rate_limit_per_hour === null}
+          saving={savingBurst}
+          onSave={onSaveBurst}
+        />
+        {user.rate_limit_burst !== null && (
+          <div style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)" }}>
+            {user.burst_tokens_available}/{user.rate_limit_burst} available
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -98,8 +142,19 @@ export function LocalUsersList() {
   });
 
   const updateRateLimit = useMutation({
-    mutationFn: ({ id, rate_limit_per_hour }: { id: number; rate_limit_per_hour: number | null }) =>
-      updateLocalUser(id, { rate_limit_per_hour }),
+    mutationFn: ({ id, rate_limit_per_hour }: { id: number; rate_limit_per_hour: number | null }) => {
+      // Clearing the hourly limit clears any burst limit too — a burst
+      // value has no effect without one, and the API rejects the
+      // combination outright.
+      const input = rate_limit_per_hour === null ? { rate_limit_per_hour, rate_limit_burst: null } : { rate_limit_per_hour };
+      return updateLocalUser(id, input);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
+
+  const updateRateLimitBurst = useMutation({
+    mutationFn: ({ id, rate_limit_burst }: { id: number; rate_limit_burst: number | null }) =>
+      updateLocalUser(id, { rate_limit_burst }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
   });
 
@@ -219,8 +274,10 @@ export function LocalUsersList() {
                 <td style={tdStyle}>
                   <RateLimitCell
                     user={user}
-                    saving={updateRateLimit.isPending}
-                    onSave={(rate_limit_per_hour) => updateRateLimit.mutate({ id: user.id, rate_limit_per_hour })}
+                    savingHourly={updateRateLimit.isPending}
+                    savingBurst={updateRateLimitBurst.isPending}
+                    onSaveHourly={(rate_limit_per_hour) => updateRateLimit.mutate({ id: user.id, rate_limit_per_hour })}
+                    onSaveBurst={(rate_limit_burst) => updateRateLimitBurst.mutate({ id: user.id, rate_limit_burst })}
                   />
                 </td>
                 <td style={tdStyle}>

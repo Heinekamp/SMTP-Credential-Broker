@@ -8,7 +8,7 @@ from app.models.config_generation import ConfigGeneration
 from app.models.enums import MailStatus, TestResult, TlsMode, ValidationResult
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
 from app.models.mail_log import MailLog, MailLogIngestState
-from app.models.rate_limit import LocalUserRateLimitCounter
+from app.models.rate_limit import LocalUserBurstBucket, LocalUserRateLimitCounter
 from app.models.sender import Sender
 from app.models.settings import BackgroundJobState, RelaySettings
 from app.models.tls import TlsCertificateState
@@ -28,6 +28,7 @@ __all__ = [
     "MailLog",
     "MailLogIngestState",
     "LocalUserRateLimitCounter",
+    "LocalUserBurstBucket",
     "Sender",
     "BackgroundJobState",
     "RelaySettings",
