@@ -86,4 +86,5 @@ class BackgroundJobState(Base):
     cert_renewal_last_checked_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     cert_last_renewal_attempt_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     cert_last_renewal_error: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    rate_limit_cleanup_last_run_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
