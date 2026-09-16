@@ -13,7 +13,13 @@ services:
       # by this mount flag.
       - relay_config:/shared-config:ro
     ports:
-      - "8000:8000"
+      # Host-side port only — override via APP_HOST_PORT (.env) if 8000 is
+      # already taken by something else on the host (e.g. Portainer).
+      # Compose concatenates rather than replaces `ports` across an
+      # override file, so this can't be fixed with a
+      # docker-compose.override.yml the way other host-specific settings
+      # are — it has to be a variable in the base file itself.
+      - "${APP_HOST_PORT:-8000}:8000"
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
       RELAY_COOKIE_SECURE: "true"

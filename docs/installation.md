@@ -88,7 +88,7 @@ mounting one manually.
 
 | Port | Service | Purpose |
 |---|---|---|
-| 8000 | `app` | Web UI + API (put a reverse proxy with real TLS in front of this for anything beyond a trusted internal network — the app itself serves plain HTTP) |
+| 8000 (`APP_HOST_PORT` in `.env` to change) | `app` | Web UI + API (put a reverse proxy with real TLS in front of this for anything beyond a trusted internal network — the app itself serves plain HTTP) |
 | 587 | `postfix` | SMTP submission — what internal services connect to. `AUTH` is mandatory; there is no way to relay without it (postfix-architecture.md §6-8) |
 
 Postfix's plain SMTP port (25) is intentionally not exposed at all — it's
