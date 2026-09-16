@@ -32,6 +32,11 @@ class UpstreamAccount(Base):
         str_enum(TestResult, "test_result"), nullable=True
     )
     last_test_error: Mapped[str | None] = mapped_column(nullable=True)
+    # None = unlimited (today's behavior) — translated into a per-account
+    # smtp_destination_rate_delay on a synthetic Postfix transport
+    # (core/config_generator.py), pacing outbound deliveries rather than
+    # rejecting anything, so excess mail just sits in Postfix's own queue.
+    rate_limit_per_hour: Mapped[int | None] = mapped_column(nullable=True, default=None)
     created_at: Mapped[datetime.datetime] = mapped_column(
         default=utcnow, nullable=False
     )

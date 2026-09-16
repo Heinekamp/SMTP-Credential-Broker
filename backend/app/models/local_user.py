@@ -27,6 +27,11 @@ class LocalSmtpUser(Base):
         default=utcnow, nullable=False
     )
     password_last_rotated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    # None = unlimited (today's behavior) — enforced by a Postfix
+    # policy-delegation service keyed on sasl_username
+    # (core/rate_limit_policy.py), not Postfix's own anvil limiter, which
+    # only keys on client IP and can't distinguish local users sharing one.
+    rate_limit_per_hour: Mapped[int | None] = mapped_column(nullable=True, default=None)
 
     # passive_deletes=True: see the identical comment on Sender.permissions
     # (sender.py) — user_sender_permissions.local_smtp_user_id is part of
