@@ -40,17 +40,24 @@ visible to anything but this relay.
 
 ## Screenshots
 
+Light mode and a custom accent color are both admin-configurable (Settings →
+Appearance) — every screen below still works in light mode too.
+
 | Dashboard | Upstream Accounts |
 |---|---|
 | ![Dashboard](docs/images/dashboard.png) | ![Upstream Accounts](docs/images/upstream-accounts.png) |
 
-| Local SMTP Users | Settings — System |
+| Local SMTP Users | Mail Log |
 |---|---|
-| ![Local SMTP Users](docs/images/local-smtp-users.png) | ![Settings System tab](docs/images/settings-system.png) |
+| ![Local SMTP Users](docs/images/local-smtp-users.png) | ![Mail Log](docs/images/mail-log.png) |
 
-| TOTP enrollment |
+| Settings — System | TOTP enrollment |
+|---|---|
+| ![Settings System tab](docs/images/settings-system.png) | ![TOTP enrollment with QR code](docs/images/totp-enroll.png) |
+
+| Light mode ↔ Dark mode |
 |---|
-| ![TOTP enrollment with QR code](docs/images/totp-enroll.png) |
+| ![Light mode on the left, dark mode on the right](docs/images/theme-light-dark-split.png) |
 
 ## Quick start
 
