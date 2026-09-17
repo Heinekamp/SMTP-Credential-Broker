@@ -42,7 +42,8 @@ no changes. Then add the new image to the README's Screenshots section.
   neither of which anything here needs to actually work end-to-end).
 - `shots.py` — the registry described above; the intended extension point.
 - `capture.py` — the Playwright driver: logs in once, then walks the
-  registry. Also handles `ThemeSplitShot`s (see `theme-light-dark-split`),
-  which capture the same route in both themes and composite them
-  side-by-side with Pillow.
+  registry. Also handles `GridShot`s (see `theme-accent-grid`), which
+  capture the same route once per (theme, accent color) cell — PATCHing
+  `/api/branding` directly between shots — and composite the results into
+  one grid image with Pillow.
 - `run.sh` — orchestrates the whole pipeline end to end.

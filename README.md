@@ -77,9 +77,9 @@ Appearance) — every screen below still works in light mode too.
 |---|---|
 | ![Settings System tab](docs/images/settings-system.png) | ![TOTP enrollment with QR code](docs/images/totp-enroll.png) |
 
-| Light mode ↔ Dark mode |
+| Theming & accent colors |
 |---|
-| ![Light mode on the left, dark mode on the right](docs/images/theme-light-dark-split.png) |
+| ![Nine variations of the Dashboard, alternating dark/light mode with different accent colors](docs/images/theme-accent-grid.png) |
 
 ## Quick start
 
