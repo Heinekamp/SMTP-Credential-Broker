@@ -1,0 +1,84 @@
+version: 2
+updates:
+  # Backend: pyproject.toml's `dependencies` plus the `dev`/`screenshots`
+  # extras (backend/pyproject.toml).
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      backend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # The mandatory integration test suite's own requirements.txt — separate
+  # from the backend's, and from the backend's own venv (integration/README.md).
+  - package-ecosystem: "pip"
+    directory: "/integration"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:15"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      integration-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Frontend: package.json / package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      frontend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # backend/Dockerfile's build context is the repo root (docker-compose.yml's
+  # `context: .`), so its directory here is "/", not "/backend".
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:45"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  - package-ecosystem: "docker"
+    directory: "/postfix"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:45"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  - package-ecosystem: "docker"
+    directory: "/integration/upstream_stub"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:45"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  # .github/workflows/ci.yml's actions/* pins.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
