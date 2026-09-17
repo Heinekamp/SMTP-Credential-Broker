@@ -29,10 +29,21 @@ jobs:
       # immediately without actually waiting for CI (see #69). This only
       # *requests* auto-merge; the actual merge happens once those
       # required checks pass.
+      #
+      # Excludes package-ecosystem "docker": a floating base-image tag
+      # like python:3.12-slim -> 3.14-slim reads as a "minor" bump to
+      # fetch-metadata (same leading version component), but a Python/
+      # Node/Debian minor release is not a safe drop-in the way an actual
+      # semver-minor library release is — this is exactly how #70 broke
+      # the integration test image's asyncio usage and merged straight to
+      # main before anyone looked at it. Docker updates always get a
+      # plain PR now, regardless of update-type.
       - name: Enable auto-merge for patch/minor updates
         if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          steps.metadata.outputs.package-ecosystem != 'docker' && (
+            steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+            steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          )
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
