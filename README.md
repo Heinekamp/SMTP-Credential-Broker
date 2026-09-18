@@ -19,6 +19,9 @@ as specific, admin-approved sender addresses. Revoking one service's access
 never touches the shared upstream account, and the upstream password is never
 visible to anything but this relay.
 
+> [!CAUTION]
+> **AI-generated code:** Most of the implementation for this project was written by Claude and received only limited human review beyond functional testing. Before deploying this software in critical infrastructure or other security-sensitive environments, thoroughly review the code and security architecture to ensure they meet your requirements.
+
 ## Features
 
 - **Centralized upstream credentials** — store SMTP provider accounts once,

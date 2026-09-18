@@ -25,3 +25,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Machine-local / infra notes (production host, local install paths) —
+# never shared across machines or committed.
+CLAUDE.local.md
