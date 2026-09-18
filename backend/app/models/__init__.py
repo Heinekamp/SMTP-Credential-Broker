@@ -11,7 +11,7 @@ from app.models.mail_log import MailLog, MailLogIngestState
 from app.models.rate_limit import LocalUserBurstBucket, LocalUserRateLimitCounter
 from app.models.sender import Sender
 from app.models.settings import BackgroundJobState, RelaySettings
-from app.models.tls import TlsCertificateState
+from app.models.tls import TlsCertificateState, TlsPendingManualChallenge
 from app.models.upstream import UpstreamAccount
 
 __all__ = [
@@ -33,5 +33,6 @@ __all__ = [
     "BackgroundJobState",
     "RelaySettings",
     "TlsCertificateState",
+    "TlsPendingManualChallenge",
     "UpstreamAccount",
 ]

@@ -78,12 +78,21 @@ reaches the queue.
 Settings → TLS Certificate lets an admin provision a real, auto-renewing
 Let's Encrypt certificate instead, via a DNS-01 challenge — no inbound
 port 80/443 needed, so this works for a relay that's only reachable on a
-LAN. Cloudflare is the only supported DNS provider today; configure a
-domain, a Cloudflare API token scoped to `Zone:DNS:Edit` on that domain's
-zone, and enable it. "Verify Cloudflare Access" is a read-only precheck
-(no DNS record is created, no Let's Encrypt attempt spent) worth running
-before "Issue / Renew Now", which makes a real, rate-limited request
-against Let's Encrypt's production API.
+LAN. Two DNS providers are supported:
+
+- **Cloudflare** — fully automated. Configure a domain, a Cloudflare API
+  token scoped to `Zone:DNS:Edit` on that domain's zone, and enable it.
+  "Verify Cloudflare Access" is a read-only precheck (no DNS record is
+  created, no Let's Encrypt attempt spent) worth running before
+  "Issue / Renew Now", which makes a real, rate-limited request against
+  Let's Encrypt's production API.
+- **Manual** — for any other DNS host. No credentials are needed;
+  "Start DNS-01 Challenge" shows the `_acme-challenge` TXT record to add
+  yourself, wherever the domain is actually hosted. Once it's added,
+  "Verify & Continue" checks it and finishes issuance — safe to retry as
+  many times as needed while DNS propagates. Because it needs a human in
+  the loop, a domain on the manual provider does not auto-renew in the
+  background; renew it the same way once it's close to expiry.
 
 **The domain you configure here is independent of `RELAY_SUBMISSION_HOST`
 above.** This domain only needs to match what a connecting client
@@ -98,10 +107,10 @@ genuinely the hostname clients connect to.
 > itself claims to be. If this relay only lives on your LAN, that domain
 > needs a **local** DNS answer pointing it at the relay's LAN IP address —
 > a "Local DNS Record" (the exact name varies by vendor) in your router or
-> DNS server. The public Cloudflare zone used for the DNS-01 challenge
-> above doesn't need, and normally shouldn't have, an A record for this
-> domain at all — it exists purely to prove domain ownership to Let's
-> Encrypt, not to make the relay reachable from the internet.
+> DNS server. The public DNS zone used for the DNS-01 challenge above
+> doesn't need, and normally shouldn't have, an A record for this domain
+> at all — it exists purely to prove domain ownership to Let's Encrypt,
+> not to make the relay reachable from the internet.
 >
 > Skip this and every client that connects using the relay's bare IP
 > address (rather than the domain) will fail with a certificate/hostname

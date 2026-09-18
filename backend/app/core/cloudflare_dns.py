@@ -9,12 +9,9 @@ dependency tree via its own network layer, so splitting HTTP libraries
 within this one feature would only double the idioms to maintain for no
 real benefit."""
 
-import time
-
-import dns.exception
-import dns.resolver
 import requests
 
+from app.core import dns_utils
 from app.core.logging_config import get_logger
 
 _logger = get_logger("cloudflare_dns")
@@ -142,48 +139,9 @@ class CloudflareDnsProvider:
         Encrypt's own validation (which queries real DNS) finding
         nothing. Only once at least one authoritative nameserver
         genuinely serves the expected value is the challenge answered."""
-        deadline = time.monotonic() + timeout_seconds
-        nameservers = self._authoritative_nameservers(name)
-        if not nameservers:
-            _logger.warning("wait_for_propagation: could not resolve authoritative nameservers for %s", name)
-            return False
-
-        attempt = 0
-        while time.monotonic() < deadline:
-            attempt += 1
-            if self._txt_record_visible_at(nameservers, name, value):
-                _logger.info("wait_for_propagation: %s visible on attempt %d via %s", name, attempt, nameservers)
-                return True
-            time.sleep(2)
-        _logger.warning(
-            "wait_for_propagation: %s never became visible via %s within %.0fs", name, nameservers, timeout_seconds
-        )
-        return False
-
-    def _authoritative_nameservers(self, name: str) -> list[str]:
-        """Peels labels off `name` (the same technique _resolve_zone_id
-        uses) until an NS lookup succeeds, so this works whether given a
-        bare domain or a full challenge name like
-        "_acme-challenge.sub.example.com"."""
-        labels = name.split(".")
-        for i in range(len(labels) - 1):
-            candidate = ".".join(labels[i:])
-            try:
-                answer = dns.resolver.resolve(candidate, "NS", lifetime=self.timeout)
-            except dns.exception.DNSException:
-                continue
-            return [str(rdata.target).rstrip(".") for rdata in answer]
-        return []
-
-    @staticmethod
-    def _txt_record_visible_at(nameservers: list[str], name: str, value: str) -> bool:
-        for nameserver in nameservers:
-            try:
-                answer = dns.resolver.resolve_at(nameserver, name, "TXT", lifetime=5.0)
-            except dns.exception.DNSException:
-                continue
-            for rdata in answer:
-                content = b"".join(rdata.strings).decode("utf-8", errors="replace")
-                if content == value:
-                    return True
-        return False
+        result = dns_utils.wait_for_propagation_via_authoritative_dns(name, value, timeout_seconds)
+        if result:
+            _logger.info("wait_for_propagation: %s became visible", name)
+        else:
+            _logger.warning("wait_for_propagation: %s never became visible within %.0fs", name, timeout_seconds)
+        return result

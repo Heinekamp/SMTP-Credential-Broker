@@ -35,3 +35,30 @@ class TlsCertificateState(Base):
     acme_account_key_encrypted: Mapped[bytes | None] = mapped_column(nullable=True, default=None)
     acme_account_uri: Mapped[str | None] = mapped_column(nullable=True, default=None)
     updated_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class TlsPendingManualChallenge(Base):
+    """Singleton row (id fixed at 1) — the in-progress manual DNS-01
+    challenge, if any. Unlike TlsCertificateState, *absence* of a row is
+    the normal state (no manual challenge currently in progress); it's
+    created by acme_tls.begin_manual_dns_challenge and cleared by
+    acme_tls.finalize_manual_dns_challenge once resolved (issued or
+    unrecoverably failed). order_json is the serialized ACME order +
+    authorizations (acme.messages.OrderResource.json_dumps()) needed to
+    resume the order on a later, separate HTTP request — the admin may
+    take anywhere from seconds to hours to add the TXT record."""
+
+    __tablename__ = "tls_pending_manual_challenge"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    domain: Mapped[str] = mapped_column(nullable=False)
+    contact_email: Mapped[str | None] = mapped_column(nullable=True, default=None)
+    record_name: Mapped[str] = mapped_column(nullable=False)
+    record_value: Mapped[str] = mapped_column(nullable=False)
+    order_json: Mapped[str] = mapped_column(nullable=False)
+    encrypted_cert_key_pem: Mapped[bytes] = mapped_column(nullable=False)
+    encrypted_account_key_pem: Mapped[bytes] = mapped_column(nullable=False)
+    account_uri: Mapped[str] = mapped_column(nullable=False)
+    directory_url: Mapped[str] = mapped_column(nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=utcnow, nullable=False)
+    expires_at: Mapped[datetime.datetime] = mapped_column(nullable=False)
