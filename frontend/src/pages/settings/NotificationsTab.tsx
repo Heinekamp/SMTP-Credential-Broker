@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Select, Switch, TextInput } from "../../design-system/components";
@@ -56,21 +56,26 @@ export function NotificationsTab() {
   const [abuseThresholdMinutes, setAbuseThresholdMinutes] = useState("10");
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (!settings) return;
-    setInterval(settings.connection_test_interval_minutes?.toString() ?? "");
-    setUpdateCheckEnabled(settings.update_check_enabled);
-    setRecipients(settings.notify_recipients.join(", "));
-    setSenderId(settings.notify_sender_id?.toString() ?? "");
-    setFromName(settings.notify_from_name ?? "");
-    setNotifyHealth(settings.notify_on_health_degraded);
-    setNotifyUpstream(settings.notify_on_upstream_test_failure);
-    setNotifyAppUpdate(settings.notify_on_app_update_available);
-    setNotifyPostfixUpdate(settings.notify_on_postfix_update_available);
-    setNotifyRateLimitAbuse(settings.notify_on_rate_limit_abuse);
-    setAutoDisableEnabled(settings.rate_limit_abuse_auto_disable_enabled);
-    setAbuseThresholdMinutes(String(settings.rate_limit_abuse_threshold_minutes));
-  }, [settings]);
+  // Adjusts local state when the fetched settings change, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
+    if (settings) {
+      setInterval(settings.connection_test_interval_minutes?.toString() ?? "");
+      setUpdateCheckEnabled(settings.update_check_enabled);
+      setRecipients(settings.notify_recipients.join(", "));
+      setSenderId(settings.notify_sender_id?.toString() ?? "");
+      setFromName(settings.notify_from_name ?? "");
+      setNotifyHealth(settings.notify_on_health_degraded);
+      setNotifyUpstream(settings.notify_on_upstream_test_failure);
+      setNotifyAppUpdate(settings.notify_on_app_update_available);
+      setNotifyPostfixUpdate(settings.notify_on_postfix_update_available);
+      setNotifyRateLimitAbuse(settings.notify_on_rate_limit_abuse);
+      setAutoDisableEnabled(settings.rate_limit_abuse_auto_disable_enabled);
+      setAbuseThresholdMinutes(String(settings.rate_limit_abuse_threshold_minutes));
+    }
+  }
 
   const [testResult, setTestResult] = useState<TestAlertResult | null>(null);
 

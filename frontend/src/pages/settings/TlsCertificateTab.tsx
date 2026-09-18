@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Icon, Select, StatusBadge, Switch, TextInput } from "../../design-system/components";
@@ -64,33 +64,34 @@ export function TlsCertificateTab() {
   const [apiToken, setApiToken] = useState("");
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (!settings) return;
-    setEnabled(settings.acme_enabled);
-    setDomain(settings.domain ?? "");
-    setContactEmail(settings.contact_email ?? "");
-    setDnsProvider(settings.dns_provider === "manual" ? "manual" : "cloudflare");
-    setZoneId(settings.cloudflare_zone_id ?? "");
-  }, [settings]);
-
   const [verifyResult, setVerifyResult] = useState<TlsActionResult | null>(null);
   const [issueResult, setIssueResult] = useState<TlsActionResult | null>(null);
   const [manualChallenge, setManualChallenge] = useState<ManualDnsChallenge | null>(null);
   const [manualConfirmResult, setManualConfirmResult] = useState<TlsActionResult | null>(null);
   const [manualCopyState, setManualCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
-  useEffect(() => {
-    if (!settings) return;
-    if (settings.manual_dns_pending && settings.manual_dns_record_name && settings.manual_dns_record_value) {
-      setManualChallenge({
-        success: true,
-        detail: "Add this TXT record, then click Verify & Continue.",
-        record_name: settings.manual_dns_record_name,
-        record_value: settings.manual_dns_record_value,
-        expires_at: settings.manual_dns_expires_at,
-      });
+  // Adjusts local state when the fetched settings change, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
+    if (settings) {
+      setEnabled(settings.acme_enabled);
+      setDomain(settings.domain ?? "");
+      setContactEmail(settings.contact_email ?? "");
+      setDnsProvider(settings.dns_provider === "manual" ? "manual" : "cloudflare");
+      setZoneId(settings.cloudflare_zone_id ?? "");
+      if (settings.manual_dns_pending && settings.manual_dns_record_name && settings.manual_dns_record_value) {
+        setManualChallenge({
+          success: true,
+          detail: "Add this TXT record, then click Verify & Continue.",
+          record_name: settings.manual_dns_record_name,
+          record_value: settings.manual_dns_record_value,
+          expires_at: settings.manual_dns_expires_at,
+        });
+      }
     }
-  }, [settings]);
+  }
 
   const save = useMutation({
     mutationFn: (update: TlsSettingsUpdate) => updateTlsSettings(update),
@@ -171,7 +172,10 @@ export function TlsCertificateTab() {
     domain.trim() !== "" &&
     (dnsProvider === "manual" || settings?.cloudflare_api_token_configured || apiToken.trim() !== "");
   const expiresAt = settings?.cert_not_after ? parseApiDate(settings.cert_not_after) : null;
-  const expiringSoon = expiresAt ? expiresAt.getTime() - Date.now() < RENEWAL_THRESHOLD_DAYS * 24 * 60 * 60 * 1000 : false;
+  // Date.now() is impure and can't be called directly in the render body —
+  // a lazy useState initializer runs once per mount, outside render proper.
+  const [now] = useState(() => Date.now());
+  const expiringSoon = expiresAt ? expiresAt.getTime() - now < RENEWAL_THRESHOLD_DAYS * 24 * 60 * 60 * 1000 : false;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>

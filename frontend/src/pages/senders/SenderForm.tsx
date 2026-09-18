@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -28,18 +28,24 @@ export function SenderForm() {
   const [upstreamAccountId, setUpstreamAccountId] = useState<number | "">("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Adjusts local state when the fetched entity/list changes, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevExisting, setPrevExisting] = useState(existing);
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
     if (existing) {
       setAddress(existing.address);
       setUpstreamAccountId(existing.upstream_account_id);
     }
-  }, [existing]);
+  }
 
-  useEffect(() => {
+  const [prevAccounts, setPrevAccounts] = useState(accounts);
+  if (accounts !== prevAccounts) {
+    setPrevAccounts(accounts);
     if (!isEdit && upstreamAccountId === "" && accounts && accounts.length > 0) {
       setUpstreamAccountId(accounts[0].id);
     }
-  }, [accounts, isEdit, upstreamAccountId]);
+  }
 
   const save = useMutation({
     mutationFn: () => {

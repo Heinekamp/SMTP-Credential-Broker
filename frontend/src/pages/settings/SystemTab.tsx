@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Select, StatusBadge } from "../../design-system/components";
@@ -54,11 +54,16 @@ export function SystemTab() {
   const [auditLogRetention, setAuditLogRetention] = useState("");
   const [retentionSaved, setRetentionSaved] = useState(false);
 
-  useEffect(() => {
-    if (!notificationSettings) return;
-    setMailLogRetention(notificationSettings.mail_log_retention_days?.toString() ?? "");
-    setAuditLogRetention(notificationSettings.audit_log_retention_days?.toString() ?? "");
-  }, [notificationSettings]);
+  // Adjusts local state when the fetched settings change, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevNotificationSettings, setPrevNotificationSettings] = useState(notificationSettings);
+  if (notificationSettings !== prevNotificationSettings) {
+    setPrevNotificationSettings(notificationSettings);
+    if (notificationSettings) {
+      setMailLogRetention(notificationSettings.mail_log_retention_days?.toString() ?? "");
+      setAuditLogRetention(notificationSettings.audit_log_retention_days?.toString() ?? "");
+    }
+  }
 
   const saveRetention = useMutation({
     mutationFn: () =>
