@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Icon } from "../../design-system/components";
-import {
-  getUpstreamAccount,
-  testUpstreamAccountConnection,
-  type TestConnectionResponse,
-} from "../../lib/api/upstreamAccounts";
+import { getUpstreamAccount, testUpstreamAccountConnection } from "../../lib/api/upstreamAccounts";
 
 // Design handoff §5's Test Connection screen — its own screen, not a
 // modal: 5 sequential sub-checks, each a status icon + label + one-line
@@ -24,26 +19,20 @@ export function TestConnection() {
     queryFn: () => getUpstreamAccount(accountId),
   });
 
-  const [result, setResult] = useState<TestConnectionResponse | null>(null);
-  const [running, setRunning] = useState(false);
-
-  async function runTest() {
-    setRunning(true);
-    try {
+  const {
+    data: result,
+    isFetching: running,
+    refetch: runTest,
+  } = useQuery({
+    queryKey: ["test-connection", accountId],
+    queryFn: async () => {
       const response = await testUpstreamAccountConnection(accountId);
-      setResult(response);
       // The result is persisted server-side onto the account (for the
       // list/dashboard views) — refresh those caches too.
       queryClient.invalidateQueries({ queryKey: ["upstream-accounts"] });
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  useEffect(() => {
-    runTest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId]);
+      return response;
+    },
+  });
 
   return (
     <Card style={{ maxWidth: 520 }}>
@@ -86,7 +75,7 @@ export function TestConnection() {
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button variant="accent" onClick={runTest} disabled={running}>
+        <Button variant="accent" onClick={() => runTest()} disabled={running}>
           Run Test Again
         </Button>
         <Button variant="default" onClick={() => navigate("/upstream-accounts")}>

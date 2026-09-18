@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -38,7 +38,11 @@ export function UpstreamAccountForm() {
   const [rateLimitPerHour, setRateLimitPerHour] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Adjusts local state when the fetched entity changes, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevExisting, setPrevExisting] = useState(existing);
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
     if (existing) {
       setName(existing.name);
       setHost(existing.host);
@@ -47,7 +51,7 @@ export function UpstreamAccountForm() {
       setUsername(existing.username);
       setRateLimitPerHour(existing.rate_limit_per_hour === null ? "" : String(existing.rate_limit_per_hour));
     }
-  }, [existing]);
+  }
 
   const save = useMutation({
     mutationFn: () => {

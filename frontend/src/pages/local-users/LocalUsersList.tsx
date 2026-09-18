@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -36,9 +36,13 @@ function InlineNumberField({
 }) {
   const [value, setValue] = useState(currentValue === null ? "" : String(currentValue));
 
-  useEffect(() => {
+  // Adjusts local state when the prop changes, without an Effect —
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevValue, setPrevValue] = useState(currentValue);
+  if (currentValue !== prevValue) {
+    setPrevValue(currentValue);
     setValue(currentValue === null ? "" : String(currentValue));
-  }, [currentValue]);
+  }
 
   function commit() {
     const trimmed = value.trim();

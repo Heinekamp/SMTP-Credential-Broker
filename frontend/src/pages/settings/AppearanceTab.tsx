@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, TextInput } from "../../design-system/components";
@@ -28,9 +28,13 @@ export function AppearanceTab() {
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
+  // Adjusts local state when the fetched settings change, without an
+  // Effect — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevBranding, setPrevBranding] = useState(branding);
+  if (branding !== prevBranding) {
+    setPrevBranding(branding);
     setAccentColor(branding?.accent_color ?? DEFAULT_ACCENT);
-  }, [branding]);
+  }
 
   const saveAccent = useMutation({
     mutationFn: (accent_color: string | null) => updateBranding({ accent_color }),
