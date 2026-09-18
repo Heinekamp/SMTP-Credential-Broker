@@ -49,7 +49,9 @@ class _FakePendingIssuer:
     """Fakes the begin_order/finalize_order split used by the manual
     DNS-01 flow — never touches the real `acme` package or network."""
 
-    def __init__(self, *, fail_begin_with: Exception | None = None, fail_finalize_with: Exception | None = None) -> None:
+    def __init__(
+        self, *, fail_begin_with: Exception | None = None, fail_finalize_with: Exception | None = None
+    ) -> None:
         self.fail_begin_with = fail_begin_with
         self.fail_finalize_with = fail_finalize_with
         self.begin_calls: list[dict] = []
@@ -99,6 +101,10 @@ def _configure_manual(db: Session, *, enabled: bool = True, domain: str = "smtp-
     settings_row.tls_domain = domain
     settings_row.tls_dns_provider = "manual"
     db.commit()
+
+
+def _stub_propagation(result: bool):
+    return lambda self, name, value, timeout_seconds: result
 
 
 def _configure(db: Session, *, enabled: bool = True, domain: str = "smtp-relay.example.com") -> None:
@@ -419,7 +425,7 @@ def test_finalize_manual_dns_challenge_keeps_the_pending_row_when_not_yet_propag
 ) -> None:
     _configure_manual(db_session)
     acme_tls.begin_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
-    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", lambda self, name, value, timeout_seconds: False)
+    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", _stub_propagation(False))
 
     result = acme_tls.finalize_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
 
@@ -435,7 +441,7 @@ def test_finalize_manual_dns_challenge_success_persists_state_and_clears_the_pen
     get_background_job_state(db_session).cert_last_renewal_error = "stale error from before the fix"
     db_session.commit()
     acme_tls.begin_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
-    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", lambda self, name, value, timeout_seconds: True)
+    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", _stub_propagation(True))
     monkeypatch.setattr(
         acme_tls.postfix_control,
         "install_tls_certificate",
@@ -466,7 +472,7 @@ def test_finalize_manual_dns_challenge_clears_the_pending_row_on_an_acme_failure
     being stuck retrying something that can never succeed."""
     _configure_manual(db_session)
     acme_tls.begin_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
-    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", lambda self, name, value, timeout_seconds: True)
+    monkeypatch.setattr(acme_tls.ManualDnsProvider, "wait_for_propagation", _stub_propagation(True))
 
     finalize_issuer = _FakePendingIssuer(fail_finalize_with=RuntimeError("order is invalid"))
     result = acme_tls.finalize_manual_dns_challenge(db_session, issuer=finalize_issuer)
