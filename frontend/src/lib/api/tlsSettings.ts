@@ -14,6 +14,10 @@ export interface TlsSettings {
   last_checked_at: string | null;
   last_renewal_attempt_at: string | null;
   last_renewal_error: string | null;
+  manual_dns_pending: boolean;
+  manual_dns_record_name: string | null;
+  manual_dns_record_value: string | null;
+  manual_dns_expires_at: string | null;
 }
 
 export interface TlsSettingsUpdate {
@@ -31,6 +35,14 @@ export interface TlsSettingsUpdate {
 export interface TlsActionResult {
   success: boolean;
   detail: string;
+}
+
+export interface ManualDnsChallenge {
+  success: boolean;
+  detail: string;
+  record_name: string | null;
+  record_value: string | null;
+  expires_at: string | null;
 }
 
 export function fetchTlsSettings(): Promise<TlsSettings> {
@@ -56,4 +68,16 @@ export function verifyCloudflareAccess(): Promise<TlsActionResult> {
  * changes. Subject to Let's Encrypt's rate limits. */
 export function issueCertificateNow(): Promise<TlsActionResult> {
   return apiFetch<TlsActionResult>("/api/tls-settings/issue", { method: "POST" });
+}
+
+/** Starts (or resumes) a manual DNS-01 challenge — returns the TXT
+ * record to add at whatever DNS provider actually hosts the domain. */
+export function startManualDnsChallenge(): Promise<ManualDnsChallenge> {
+  return apiFetch<ManualDnsChallenge>("/api/tls-settings/manual-dns/start", { method: "POST" });
+}
+
+/** Confirms the manual TXT record is live and finishes issuance. Safe
+ * to call repeatedly while DNS is still propagating. */
+export function confirmManualDnsChallenge(): Promise<TlsActionResult> {
+  return apiFetch<TlsActionResult>("/api/tls-settings/manual-dns/confirm", { method: "POST" });
 }

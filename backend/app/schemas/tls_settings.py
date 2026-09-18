@@ -17,6 +17,10 @@ class TlsSettingsRead(BaseModel):
     last_checked_at: datetime.datetime | None
     last_renewal_attempt_at: datetime.datetime | None
     last_renewal_error: str | None
+    manual_dns_pending: bool
+    manual_dns_record_name: str | None
+    manual_dns_record_value: str | None
+    manual_dns_expires_at: datetime.datetime | None
 
 
 class TlsSettingsUpdate(BaseModel):
@@ -43,3 +47,11 @@ class VerifyDnsAccessResponse(BaseModel):
 class IssueCertificateResponse(BaseModel):
     success: bool
     detail: str
+
+
+class ManualDnsChallengeResponse(BaseModel):
+    success: bool
+    detail: str
+    record_name: str | None
+    record_value: str | None
+    expires_at: datetime.datetime | None

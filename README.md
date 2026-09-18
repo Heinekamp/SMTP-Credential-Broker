@@ -36,8 +36,9 @@ visible to anything but this relay.
   surfaces on the notification bell, with an opt-in alert email and an
   opt-in automatic disable for a genuinely runaway sender.
 - **Automatic TLS via Let's Encrypt** — DNS-01 issuance and renewal
-  (Cloudflare) for the submission port, replacing the default self-signed
-  placeholder certificate. No inbound port 80/443 needed.
+  (Cloudflare, or manual for any other DNS provider) for the submission
+  port, replacing the default self-signed placeholder certificate. No
+  inbound port 80/443 needed.
 - **Alerting & monitoring** — an in-app notification bell plus optional
   email alerts for relay degradation, failing upstream accounts, rate-limit
   abuse, and available app/Postfix updates, backed by scheduled connection

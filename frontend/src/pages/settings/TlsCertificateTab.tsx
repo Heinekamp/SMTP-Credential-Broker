@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Card, StatusBadge, Switch, TextInput } from "../../design-system/components";
+import { Button, Card, Icon, Select, StatusBadge, Switch, TextInput } from "../../design-system/components";
+import { copyToClipboard } from "../../lib/clipboard";
 import { parseApiDate } from "../../lib/apiDate";
 import { ApiError } from "../../lib/apiClient";
 import {
+  confirmManualDnsChallenge,
   fetchTlsSettings,
   issueCertificateNow,
+  startManualDnsChallenge,
   updateTlsSettings,
   verifyCloudflareAccess,
+  type ManualDnsChallenge,
   type TlsActionResult,
   type TlsSettingsUpdate,
 } from "../../lib/api/tlsSettings";
@@ -55,6 +59,7 @@ export function TlsCertificateTab() {
   const [enabled, setEnabled] = useState(false);
   const [domain, setDomain] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  const [dnsProvider, setDnsProvider] = useState<"cloudflare" | "manual">("cloudflare");
   const [zoneId, setZoneId] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [saved, setSaved] = useState(false);
@@ -64,11 +69,28 @@ export function TlsCertificateTab() {
     setEnabled(settings.acme_enabled);
     setDomain(settings.domain ?? "");
     setContactEmail(settings.contact_email ?? "");
+    setDnsProvider(settings.dns_provider === "manual" ? "manual" : "cloudflare");
     setZoneId(settings.cloudflare_zone_id ?? "");
   }, [settings]);
 
   const [verifyResult, setVerifyResult] = useState<TlsActionResult | null>(null);
   const [issueResult, setIssueResult] = useState<TlsActionResult | null>(null);
+  const [manualChallenge, setManualChallenge] = useState<ManualDnsChallenge | null>(null);
+  const [manualConfirmResult, setManualConfirmResult] = useState<TlsActionResult | null>(null);
+  const [manualCopyState, setManualCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (!settings) return;
+    if (settings.manual_dns_pending && settings.manual_dns_record_name && settings.manual_dns_record_value) {
+      setManualChallenge({
+        success: true,
+        detail: "Add this TXT record, then click Verify & Continue.",
+        record_name: settings.manual_dns_record_name,
+        record_value: settings.manual_dns_record_value,
+        expires_at: settings.manual_dns_expires_at,
+      });
+    }
+  }, [settings]);
 
   const save = useMutation({
     mutationFn: (update: TlsSettingsUpdate) => updateTlsSettings(update),
@@ -99,19 +121,55 @@ export function TlsCertificateTab() {
     onError: (err) => setIssueResult(apiErrorResult(err)),
   });
 
+  const startManual = useMutation({
+    mutationFn: () => startManualDnsChallenge(),
+    onSuccess: (result) => {
+      setManualCopyState("idle");
+      setManualConfirmResult(null);
+      if (result.success) {
+        setManualChallenge(result);
+      } else {
+        setManualConfirmResult({ success: false, detail: result.detail });
+      }
+    },
+    onError: (err) => setManualConfirmResult(apiErrorResult(err)),
+  });
+
+  const confirmManual = useMutation({
+    mutationFn: () => confirmManualDnsChallenge(),
+    onSuccess: (result) => {
+      setManualConfirmResult(result);
+      if (result.success) {
+        setManualChallenge(null);
+        queryClient.invalidateQueries({ queryKey: ["tls-settings"] });
+      }
+      // On failure, manualChallenge is deliberately left in place so the
+      // admin can wait for DNS to propagate and just click Verify again.
+    },
+    onError: (err) => setManualConfirmResult(apiErrorResult(err)),
+  });
+
   function handleSave() {
     setSaved(false);
     const update: TlsSettingsUpdate = {
       acme_enabled: enabled,
       domain: domain.trim() === "" ? null : domain.trim(),
       contact_email: contactEmail.trim() === "" ? null : contactEmail.trim(),
+      dns_provider: dnsProvider,
       cloudflare_zone_id: zoneId.trim() === "" ? null : zoneId.trim(),
     };
     if (apiToken.trim() !== "") update.cloudflare_api_token = apiToken.trim();
     save.mutate(update);
   }
 
-  const canAct = enabled && domain.trim() !== "" && (settings?.cloudflare_api_token_configured || apiToken.trim() !== "");
+  function copyManualRecord() {
+    setManualCopyState(copyToClipboard(manualChallenge?.record_value ?? "") ? "copied" : "failed");
+  }
+
+  const canAct =
+    enabled &&
+    domain.trim() !== "" &&
+    (dnsProvider === "manual" || settings?.cloudflare_api_token_configured || apiToken.trim() !== "");
   const expiresAt = settings?.cert_not_after ? parseApiDate(settings.cert_not_after) : null;
   const expiringSoon = expiresAt ? expiresAt.getTime() - Date.now() < RENEWAL_THRESHOLD_DAYS * 24 * 60 * 60 * 1000 : false;
 
@@ -158,7 +216,7 @@ export function TlsCertificateTab() {
       <Card title="Let's Encrypt Configuration" wide>
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
           Provisions a real, auto-renewing certificate via a DNS-01 challenge — no inbound port 80/443 needed.
-          Currently supports Cloudflare as the DNS provider.
+          Cloudflare can be automated end-to-end; any other DNS host works too via the manual workflow below.
         </p>
 
         <div style={rowStyle}>
@@ -188,26 +246,44 @@ export function TlsCertificateTab() {
             style={{ width: "100%", marginBottom: 12 }}
           />
 
-          <div style={fieldLabelStyle}>Cloudflare API Token</div>
-          <TextInput
-            type="password"
-            value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
-            placeholder={settings?.cloudflare_api_token_configured ? "Leave blank to keep the current token" : ""}
-            style={{ width: "100%" }}
-          />
-          <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 4, marginBottom: 12 }}>
-            This field is write-only and never shows the stored token. Needs Zone:DNS:Edit permission scoped to
-            the zone above.
-          </p>
+          <div style={fieldLabelStyle}>DNS Provider</div>
+          <Select
+            value={dnsProvider}
+            onChange={(e) => setDnsProvider(e.target.value === "manual" ? "manual" : "cloudflare")}
+            style={{ width: "100%", marginBottom: 12 }}
+          >
+            <option value="cloudflare">Cloudflare</option>
+            <option value="manual">Manual (any DNS provider)</option>
+          </Select>
 
-          <div style={fieldLabelStyle}>Cloudflare Zone ID (optional)</div>
-          <TextInput
-            value={zoneId}
-            onChange={(e) => setZoneId(e.target.value)}
-            placeholder="Auto-detected from the domain if left blank"
-            style={{ width: "100%" }}
-          />
+          {dnsProvider === "cloudflare" ? (
+            <>
+              <div style={fieldLabelStyle}>Cloudflare API Token</div>
+              <TextInput
+                type="password"
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                placeholder={settings?.cloudflare_api_token_configured ? "Leave blank to keep the current token" : ""}
+                style={{ width: "100%" }}
+              />
+              <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 4, marginBottom: 12 }}>
+                This field is write-only and never shows the stored token. Needs Zone:DNS:Edit permission scoped to
+                the zone above.
+              </p>
+
+              <div style={fieldLabelStyle}>Cloudflare Zone ID (optional)</div>
+              <TextInput
+                value={zoneId}
+                onChange={(e) => setZoneId(e.target.value)}
+                placeholder="Auto-detected from the domain if left blank"
+                style={{ width: "100%" }}
+              />
+            </>
+          ) : (
+            <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 0, marginBottom: 0 }}>
+              No credentials needed — you'll add a TXT record yourself at whatever DNS provider hosts this domain.
+            </p>
+          )}
         </div>
 
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
@@ -224,37 +300,148 @@ export function TlsCertificateTab() {
           )}
         </div>
 
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button
-              variant="default"
-              onClick={() => {
-                setVerifyResult(null);
-                verify.mutate();
-              }}
-              disabled={verify.isPending || domain.trim() === ""}
-            >
-              {verify.isPending ? "Checking…" : "Verify Cloudflare Access"}
-            </Button>
-            <Button
-              variant="default"
-              onClick={() => {
-                setIssueResult(null);
-                issue.mutate();
-              }}
-              disabled={issue.isPending || !canAct}
-            >
-              {issue.isPending ? "Issuing…" : "Issue / Renew Now"}
-            </Button>
+        {dnsProvider === "cloudflare" ? (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                variant="default"
+                onClick={() => {
+                  setVerifyResult(null);
+                  verify.mutate();
+                }}
+                disabled={verify.isPending || domain.trim() === ""}
+              >
+                {verify.isPending ? "Checking…" : "Verify Cloudflare Access"}
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => {
+                  setIssueResult(null);
+                  issue.mutate();
+                }}
+                disabled={issue.isPending || !canAct}
+              >
+                {issue.isPending ? "Issuing…" : "Issue / Renew Now"}
+              </Button>
+            </div>
+            <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
+              Verify is a read-only check against Cloudflare and never costs a Let's Encrypt attempt — try it first.
+              Issue/Renew makes a real request against Let's Encrypt's rate-limited production API using whatever
+              is currently saved — save first if you just changed something above.
+            </p>
+            {resultBanner(verifyResult, verify.isPending)}
+            {resultBanner(issueResult, issue.isPending)}
           </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
-            Verify is a read-only check against Cloudflare and never costs a Let's Encrypt attempt — try it first.
-            Issue/Renew makes a real request against Let's Encrypt's rate-limited production API using whatever
-            is currently saved — save first if you just changed something above.
-          </p>
-          {resultBanner(verifyResult, verify.isPending)}
-          {resultBanner(issueResult, issue.isPending)}
-        </div>
+        ) : (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-default)" }}>
+            {!manualChallenge ? (
+              <>
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setManualConfirmResult(null);
+                    startManual.mutate();
+                  }}
+                  disabled={startManual.isPending || !canAct}
+                >
+                  {startManual.isPending ? "Starting…" : "Start DNS-01 Challenge"}
+                </Button>
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
+                  Makes a real request against Let's Encrypt's rate-limited production API and shows the TXT
+                  record to add — save first if you just changed something above.
+                </p>
+                {resultBanner(manualConfirmResult, startManual.isPending)}
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    borderTop: "3px solid var(--brand-yellow)",
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--surface-well)",
+                    marginBottom: 16,
+                  }}
+                >
+                  <Icon name="alert-triangle" size={18} color="var(--brand-yellow)" />
+                  <p style={{ margin: 0, fontSize: "var(--text-sm)" }}>
+                    Add this TXT record at your DNS provider before continuing. It can take a few minutes to
+                    propagate — Verify &amp; Continue can be retried as many times as needed.
+                  </p>
+                </div>
+
+                <div style={fieldLabelStyle}>TXT record name</div>
+                <div
+                  style={{
+                    background: "var(--surface-well)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "10px 12px",
+                    marginBottom: 12,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--text-sm)",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {manualChallenge.record_name}
+                </div>
+
+                <div style={fieldLabelStyle}>TXT record value</div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: "var(--surface-well)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "10px 12px",
+                    marginBottom: 16,
+                  }}
+                >
+                  <code style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", wordBreak: "break-all" }}>
+                    {manualChallenge.record_value}
+                  </code>
+                  <Button variant="default" onClick={copyManualRecord}>
+                    {manualCopyState === "copied" ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                {manualCopyState === "failed" && (
+                  <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginTop: -8, marginBottom: 16 }}>
+                    Couldn't copy automatically — select the value above and copy it manually (Ctrl+C).
+                  </p>
+                )}
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Button
+                    variant="accent"
+                    onClick={() => {
+                      setManualConfirmResult(null);
+                      confirmManual.mutate();
+                    }}
+                    disabled={confirmManual.isPending}
+                  >
+                    {confirmManual.isPending ? "Verifying…" : "Verify & Continue"}
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={() => {
+                      setManualChallenge(null);
+                      setManualConfirmResult(null);
+                    }}
+                    disabled={confirmManual.isPending}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                {resultBanner(manualConfirmResult, confirmManual.isPending)}
+              </>
+            )}
+          </div>
+        )}
       </Card>
     </div>
   );
