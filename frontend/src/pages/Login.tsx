@@ -82,7 +82,7 @@ export function Login() {
       <Card style={{ width: "100%", maxWidth: 380, padding: 32 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
           <BrandLogo width={32} height={32} />
-          <span style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>SMTP Relay Console</span>
+          <span style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>SMTP Credential Broker</span>
         </div>
 
         {stage === "rate-limited" && retryMessage && (

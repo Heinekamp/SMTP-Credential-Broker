@@ -8,8 +8,8 @@ builds.
 ## 1. Clone and configure
 
 ```bash
-git clone https://github.com/Heinekamp/SMTP-Manager.git
-cd SMTP-Manager
+git clone https://github.com/Heinekamp/smtp-credential-broker.git
+cd smtp-credential-broker
 cp .env.example .env
 ```
 

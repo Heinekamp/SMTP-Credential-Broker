@@ -89,7 +89,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-app = FastAPI(title="Managed SMTP Relay", lifespan=lifespan)
+app = FastAPI(title="SMTP Credential Broker", lifespan=lifespan)
 
 
 @app.middleware("http")
