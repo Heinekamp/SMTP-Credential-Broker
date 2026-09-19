@@ -42,12 +42,12 @@ encryption/auth model.
   (`enhancement`/`bug`/etc.). Multi-part work gets a master issue + linked
   child issues (e.g. #51 "Visual customization" → #52-#55). Never
   reference internal planning-file artifacts in issue/PR text.
-- **This is a solo-maintainer repo worked via direct pushes to `main`**,
+- ~~**This is a solo-maintainer repo worked via direct pushes to `main`**,
   not a PR-per-change workflow — commit and push directly once
   tests/lint/build are green. Branch protection on `main` requires the 4
   CI jobs as status checks, but `enforce_admins: false`, so that doesn't
   block direct pushes; it only gates PR merges (which is how Dependabot
-  lands its own changes).
+  lands its own changes).~~ That was oldgudiance from when the project was still in initial stages, at this point, the project has moved to a PR workflow for all changes, including Dependabot updates. All changes should be made via PRs and reviewed before merging.
 - **New automated-behavior settings default off/null** — "opt-in, never
   silently change behavior on upgrade." E.g. `rate_limit_abuse_auto_disable_enabled`
   and `notify_on_rate_limit_abuse` default `False`; `accent_color`/`logo_image`
