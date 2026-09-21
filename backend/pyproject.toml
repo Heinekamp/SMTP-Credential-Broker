@@ -31,7 +31,7 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.27",
     "time-machine>=3.5.1",
-    "ruff>=0.5",
+    "ruff>=0.16.8",
 ]
 # Only used by scripts/screenshots/ (README screenshot regeneration) —
 # never needed to run or test the app itself, so kept out of `dev`.
