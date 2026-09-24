@@ -17,6 +17,17 @@ docker compose pull    # if pulling published images rather than building locall
 docker compose up -d --build
 ```
 
+Published images (`ghcr.io/heinekamp/smtp-credential-broker/app` and
+`.../postfix`, tagged with each release's version and `latest`) are built
+and pushed automatically when a release is published
+(`.github/workflows/publish-images.yml`). This repo — and so its GHCR
+packages — is private, so `docker compose pull` needs to be logged in
+first: `docker login ghcr.io` with a GitHub personal access token that has
+`read:packages` scope. Skipping `docker login` (or skipping `pull`
+entirely) is fine too — `docker compose up -d --build` always builds
+locally from the checked-out source regardless, which is why it's still
+the second line above rather than an either/or choice.
+
 That's the whole procedure for a normal release. The `app` container's
 entrypoint runs `alembic upgrade head` on every start, before serving any
 traffic, so schema migrations are applied automatically — there is no

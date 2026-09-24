@@ -1,5 +1,13 @@
 services:
   app:
+    # Naming this alongside `build:` is what makes `docker compose pull`
+    # (docs/upgrading.md) a real alternative to `--build`: with both
+    # present, `build`/`up --build` still build and tag locally as before
+    # (published-image publishing, on a GitHub Release, is
+    # .github/workflows/publish-images.yml — issue #38), while `pull`
+    # fetches this name from GHCR instead. RELAY_IMAGE_TAG defaults to
+    # `latest`; only published releases publish tags, never `main` itself.
+    image: ghcr.io/heinekamp/smtp-credential-broker/app:${RELAY_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -42,6 +50,7 @@ services:
       start_period: 15s
 
   postfix:
+    image: ghcr.io/heinekamp/smtp-credential-broker/postfix:${RELAY_IMAGE_TAG:-latest}
     build:
       context: ./postfix
     restart: unless-stopped
