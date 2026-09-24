@@ -125,13 +125,54 @@ def test_failed_auth_warning_is_not_mistaken_for_a_queue_id() -> None:
     failed AUTH attempt logs a "warning: ...: sasl_username=x" line, and
     the queue-ID regex was matching the leading word "warning" itself as a
     7-character queue ID, fabricating a phantom mail_log row attributing a
-    failed login to a fake "warning" queue."""
+    failed login to a fake "warning" queue. Fixed by requiring a digit in
+    a queue ID (see _QUEUE_ID_RE) — confirmed here by checking this event
+    never carries a queue_id at all, regardless of which kind it parses as."""
     line = (
         "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: "
         "unknown[172.18.0.1]: SASL CRAM-MD5 authentication failed: "
         "authentication failure, sasl_username=printer-service"
     )
-    assert parse_line(line) is None
+    event = parse_line(line)
+    assert event is not None
+    assert event.queue_id is None
+
+
+def test_failed_auth_warning_is_parsed_as_a_rejection() -> None:
+    """Regression test for issue #105: the digit-requiring fix above used
+    to stop this line matching _QUEUE_ID_RE at all, but nothing else
+    picked it up either — the event fell through every branch and
+    parse_line returned None, so a rejected login left no mail_log trace
+    whatsoever. It must now surface as a "reject" event, attributed by
+    sasl_username exactly like a NOQUEUE reject."""
+    line = (
+        "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: "
+        "unknown[172.18.0.1]: SASL CRAM-MD5 authentication failed: "
+        "authentication failure, sasl_username=printer-service"
+    )
+    event = parse_line(line)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.queue_id is None
+    assert event.sasl_username == "printer-service"
+    assert event.envelope_sender is None
+    assert "CRAM-MD5" in event.error
+    assert "authentication failure" in event.error
+
+
+def test_failed_auth_warning_without_sasl_username_is_still_captured() -> None:
+    """Some failure modes (e.g. a mechanism that never reveals a
+    username) don't append sasl_username= at all — the event must still
+    be captured, just without that attribution."""
+    line = (
+        "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: "
+        "unknown[172.18.0.1]: SASL LOGIN authentication failed: no secret in database"
+    )
+    event = parse_line(line)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.sasl_username is None
+    assert "no secret in database" in event.error
 
 
 def test_other_plain_log_level_words_are_not_mistaken_for_queue_ids() -> None:

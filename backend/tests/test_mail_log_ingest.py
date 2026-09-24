@@ -41,6 +41,11 @@ _RATE_LIMITED_REJECT_LINE = (
     "sasl_method=PLAIN sasl_username=printer-service"
 )
 
+_FAILED_AUTH_LINE = (
+    "Sep 14 10:00:04 relay postfix/submission/smtpd[1]: warning: unknown[172.20.0.1]: "
+    "SASL PLAIN authentication failed: authentication failure, sasl_username=printer-service"
+)
+
 
 @pytest.fixture()
 def _seed(db_session: Session) -> None:
@@ -113,6 +118,25 @@ def test_ingest_attributes_a_rate_limit_rejection_to_the_local_user(
     )
     assert rejected.local_smtp_user_id == local_user.id
     assert "rate limit exceeded" in rejected.error
+
+
+def test_ingest_records_a_failed_auth_attempt(
+    db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for issue #105: a client presenting wrong SMTP AUTH
+    credentials used to leave no trace in mail_log at all."""
+    _patch_tail(monkeypatch, [*_LINES, _FAILED_AUTH_LINE])
+    ingest_new_log_lines(db_session)
+
+    local_user = db_session.query(LocalSmtpUser).filter(LocalSmtpUser.username == "printer-service").one()
+    rejected = (
+        db_session.query(MailLog)
+        .filter(MailLog.status == MailStatus.rejected, MailLog.error.like("%authentication failed%"))
+        .one()
+    )
+    assert rejected.local_smtp_user_id == local_user.id
+    assert rejected.queue_id.startswith("REJECT-")
+    assert "authentication failure" in rejected.error
 
 
 def test_ingest_persists_offset_and_is_idempotent(
