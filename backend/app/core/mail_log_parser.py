@@ -26,6 +26,14 @@ looks like:
 
     postfix/submission/smtpd[1]: warning: unknown[1.2.3.4]: SASL PLAIN
         authentication failed: authentication failure, sasl_username=someuser
+
+A client that can't complete TLS negotiation, or that connects and drops
+before finishing whatever it was doing, also never gets a queue ID:
+
+    postfix/submission/smtpd[1]: warning: unknown[1.2.3.4]: SSL_accept
+        error from unknown[1.2.3.4]: -1
+    postfix/submission/smtpd[1]: lost connection after STARTTLS from
+        unknown[1.2.3.4]
 """
 
 import dataclasses
@@ -73,6 +81,20 @@ _NOQUEUE_REJECT_RE = re.compile(r"^NOQUEUE: reject: .*?: (?P<code_and_text>\d{3}
 _AUTH_FAILED_RE = re.compile(
     r"^warning: (?P<client>\S+): SASL (?P<mechanism>\S+) authentication failed: (?P<detail>.*)$"
 )
+# A client whose TLS stack can't negotiate with this relay's config (old
+# embedded gear stuck on a retired protocol/cipher, or attempting implicit
+# TLS on the STARTTLS-only submission port) never gets far enough to
+# attempt AUTH at all — issue #108. The companion "warning: TLS library
+# problem: ..." line Postfix usually logs alongside this carries no client
+# identifier at all, so it's deliberately not matched here: a row with no
+# attribution wouldn't be actionable, just noise.
+_TLS_HANDSHAKE_FAILED_RE = re.compile(r"^warning: (?P<client>\S+): SSL_accept error from \S+: (?P<detail>.+)$")
+# A client that connects and then drops mid-session — firewall/NAT
+# weirdness, a device that can't complete STARTTLS, a health-check probe
+# hitting the submission port — also never gets a queue ID. Unlike the
+# other reject shapes above, Postfix logs this one *without* a leading
+# "warning:" (issue #108).
+_LOST_CONNECTION_RE = re.compile(r"^lost connection after (?P<phase>\S+) from (?P<client>\S+)$")
 
 _POSTFIX_STATUS_TO_MAIL_STATUS = {
     "sent": MailStatus.sent,
@@ -155,6 +177,22 @@ def parse_line(line: str) -> LogEvent | None:
             timestamp=timestamp,
             sasl_username=sasl_match.group("value") if sasl_match else None,
             error=f"SASL {auth_failed.group('mechanism')} authentication failed: {reason}",
+        )
+
+    tls_failed = _TLS_HANDSHAKE_FAILED_RE.match(rest)
+    if tls_failed is not None:
+        return LogEvent(
+            kind="reject",
+            timestamp=timestamp,
+            error=f"TLS handshake failed ({tls_failed.group('client')}): {tls_failed.group('detail')}",
+        )
+
+    lost_connection = _LOST_CONNECTION_RE.match(rest)
+    if lost_connection is not None:
+        return LogEvent(
+            kind="reject",
+            timestamp=timestamp,
+            error=f"Lost connection after {lost_connection.group('phase')} ({lost_connection.group('client')})",
         )
 
     queue_match = _QUEUE_ID_RE.match(rest)

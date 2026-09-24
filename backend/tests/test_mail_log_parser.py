@@ -36,6 +36,22 @@ _NOQUEUE_REJECT_WITH_SASL_LINE = (
     "from=<printer@example.com> to=<dest@example.net> proto=ESMTP helo=<client> "
     "sasl_method=PLAIN sasl_username=printer-service"
 )
+_TLS_HANDSHAKE_FAILED_LINE = (
+    "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: unknown[172.18.0.1]: "
+    "SSL_accept error from unknown[172.18.0.1]: -1"
+)
+_TLS_LIBRARY_PROBLEM_LINE = (
+    "Sep 14 09:31:03 relay-test postfix/submission/smtpd[134]: warning: TLS library problem: "
+    "error:1417C0C7:SSL routines:tls_process_client_hello:no shared cipher:../ssl/statem/statem_srvr.c:2260:"
+)
+_LOST_CONNECTION_AFTER_STARTTLS_LINE = (
+    "Sep 14 09:31:04 relay-test postfix/submission/smtpd[134]: lost connection after STARTTLS "
+    "from unknown[172.18.0.1]"
+)
+_LOST_CONNECTION_AFTER_AUTH_LINE = (
+    "Sep 14 09:31:05 relay-test postfix/submission/smtpd[134]: lost connection after AUTH "
+    "from unknown[172.18.0.1]"
+)
 
 
 def test_auth_line_is_parsed() -> None:
@@ -179,3 +195,44 @@ def test_other_plain_log_level_words_are_not_mistaken_for_queue_ids() -> None:
     for word in ("warning", "fatal", "starting", "stopping", "connect", "disconnect"):
         line = f"Sep 14 09:31:03 relay-test postfix/smtpd[1]: {word}: something sasl_username=x"
         assert parse_line(line) is None, f"{word!r} was mistaken for a queue ID"
+
+
+def test_tls_handshake_failure_is_parsed_as_a_rejection() -> None:
+    """Regression test for issue #108: a client whose TLS stack can't
+    negotiate with this relay never gets far enough to attempt AUTH at
+    all — before this, that failure left zero trace in mail_log, the
+    same gap #105 fixed for failed AUTH."""
+    event = parse_line(_TLS_HANDSHAKE_FAILED_LINE)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.queue_id is None
+    assert event.sasl_username is None
+    assert "unknown[172.18.0.1]" in event.error
+    assert "-1" in event.error
+
+
+def test_tls_library_problem_line_with_no_client_is_not_captured() -> None:
+    """The companion "warning: TLS library problem: ..." line Postfix
+    usually logs alongside a handshake failure carries no client
+    identifier at all — deliberately left unparsed rather than producing
+    an unattributed, not-actionable mail_log row."""
+    assert parse_line(_TLS_LIBRARY_PROBLEM_LINE) is None
+
+
+def test_lost_connection_after_starttls_is_parsed_as_a_rejection() -> None:
+    """Regression test for issue #108: a client that connects and drops
+    mid-session (e.g. a device that can't complete STARTTLS) also left
+    zero mail_log trace before this."""
+    event = parse_line(_LOST_CONNECTION_AFTER_STARTTLS_LINE)
+    assert event is not None
+    assert event.kind == "reject"
+    assert event.queue_id is None
+    assert "STARTTLS" in event.error
+    assert "unknown[172.18.0.1]" in event.error
+
+
+def test_lost_connection_after_auth_is_parsed_as_a_rejection() -> None:
+    event = parse_line(_LOST_CONNECTION_AFTER_AUTH_LINE)
+    assert event is not None
+    assert event.kind == "reject"
+    assert "AUTH" in event.error

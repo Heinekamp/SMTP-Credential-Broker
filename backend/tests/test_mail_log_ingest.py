@@ -46,6 +46,11 @@ _FAILED_AUTH_LINE = (
     "SASL PLAIN authentication failed: authentication failure, sasl_username=printer-service"
 )
 
+_LOST_CONNECTION_AFTER_STARTTLS_LINE = (
+    "Sep 14 10:00:05 relay postfix/submission/smtpd[1]: lost connection after STARTTLS "
+    "from unknown[172.20.0.1]"
+)
+
 
 @pytest.fixture()
 def _seed(db_session: Session) -> None:
@@ -137,6 +142,22 @@ def test_ingest_records_a_failed_auth_attempt(
     assert rejected.local_smtp_user_id == local_user.id
     assert rejected.queue_id.startswith("REJECT-")
     assert "authentication failure" in rejected.error
+
+
+def test_ingest_records_a_lost_connection(db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for issue #108: a client that drops mid-session
+    (e.g. can't complete STARTTLS) used to leave no trace in mail_log."""
+    _patch_tail(monkeypatch, [*_LINES, _LOST_CONNECTION_AFTER_STARTTLS_LINE])
+    ingest_new_log_lines(db_session)
+
+    rejected = (
+        db_session.query(MailLog)
+        .filter(MailLog.status == MailStatus.rejected, MailLog.error.like("%Lost connection%"))
+        .one()
+    )
+    assert rejected.queue_id.startswith("REJECT-")
+    assert "STARTTLS" in rejected.error
+    assert rejected.local_smtp_user_id is None
 
 
 def test_ingest_persists_offset_and_is_idempotent(

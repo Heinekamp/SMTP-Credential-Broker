@@ -9,6 +9,7 @@ deliberately a separate, slower, Docker-dependent harness.
 """
 
 import smtplib
+import socket
 import ssl
 import time
 
@@ -99,6 +100,34 @@ def test_failed_auth_does_not_produce_a_phantom_mail_log_row(api: httpx.Client, 
     response = api.get("/api/mail-log")
     response.raise_for_status()
     assert all(e["queue_id"] != "warning" for e in response.json()["entries"])
+
+
+def test_lost_connection_after_starttls_is_logged(api: httpx.Client) -> None:
+    """Regression test for issue #108: a client that issues STARTTLS and
+    then drops the connection before completing the TLS handshake used to
+    leave zero trace in mail_log — the same class of gap #105 fixed for
+    failed AUTH, just one step earlier in the session. Deliberately a raw
+    socket, not smtplib: smtplib's own starttls() would complete the
+    handshake itself, which is the one thing this test needs to *not*
+    happen so Postfix logs "lost connection after STARTTLS" instead of a
+    normal session."""
+    sock = socket.create_connection((SUBMISSION_HOST, SUBMISSION_PORT), timeout=15)
+    try:
+        sock.recv(1024)  # banner
+        sock.sendall(b"EHLO integration-test\r\n")
+        sock.recv(4096)
+        sock.sendall(b"STARTTLS\r\n")
+        sock.recv(1024)  # 220 Ready to start TLS
+    finally:
+        sock.close()  # drop before ever sending a TLS ClientHello
+
+    time.sleep(1.0)
+    response = api.get("/api/mail-log")
+    response.raise_for_status()
+    entries = response.json()["entries"]
+    assert any(
+        e["error"] and "Lost connection" in e["error"] and "STARTTLS" in e["error"] for e in entries
+    ), f"no lost-connection-after-STARTTLS row found in {entries}"
 
 
 def test_sender_matching_permission_is_accepted_and_mismatch_is_rejected(
