@@ -57,7 +57,7 @@ one, not a stale copy from before the rotation.
    `app_data` volume:
    ```bash
    docker compose up -d app_data_placeholder 2>/dev/null || true
-   docker run --rm -v smtp-manager_app_data:/data -v "$(pwd)/backups":/backups \
+   docker run --rm -v smtp-credential-broker_app_data:/data -v "$(pwd)/backups":/backups \
      alpine cp /backups/app-20260101-020000.db /data/app.db
    ```
    (Adjust the volume name to match `docker volume ls` on your host —
