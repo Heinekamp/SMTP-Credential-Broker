@@ -19,6 +19,13 @@ A rejection that never gets a queue ID at all looks like:
 
     postfix/smtpd[1]: NOQUEUE: reject: RCPT from unknown[1.2.3.4]: 553 5.7.1
         <...>: Sender address rejected: not owned by user x; from=<a@b> to=<c@d>
+
+A failed SMTP AUTH attempt (wrong password, unknown user, ...) never gets a
+queue ID either — it's rejected before `MAIL FROM` is even reached — and
+looks like:
+
+    postfix/submission/smtpd[1]: warning: unknown[1.2.3.4]: SASL PLAIN
+        authentication failed: authentication failure, sasl_username=someuser
 """
 
 import dataclasses
@@ -56,6 +63,16 @@ _TO_RE = re.compile(r"\bto=<(?P<value>[^>]*)>")
 _STATUS_RE = re.compile(r"status=(?P<status>\w+)(?:\s+\((?P<detail>.*)\))?\s*$")
 _RELAY_RE = re.compile(r"relay=(?P<host>[^\[\s,]+)\[[^\]]*\]:(?P<port>\d+)")
 _NOQUEUE_REJECT_RE = re.compile(r"^NOQUEUE: reject: .*?: (?P<code_and_text>\d{3}[^;]*);\s*(?P<rest>.*)$")
+# A failed AUTH attempt never gets a queue ID (rejected before MAIL FROM),
+# and — unlike a NOQUEUE reject — carries no "553 5.7.1 ..." style code,
+# just this free-text shape. Matched explicitly rather than left to fall
+# through to _QUEUE_ID_RE, whose digit requirement (see that regex's own
+# comment) only stops "warning" being mistaken for a queue ID; it doesn't
+# give this line anywhere to go, so before this branch existed the event
+# was silently dropped and a rejected login left no mail_log trace at all.
+_AUTH_FAILED_RE = re.compile(
+    r"^warning: (?P<client>\S+): SASL (?P<mechanism>\S+) authentication failed: (?P<detail>.*)$"
+)
 
 _POSTFIX_STATUS_TO_MAIL_STATUS = {
     "sent": MailStatus.sent,
@@ -126,6 +143,18 @@ def parse_line(line: str) -> LogEvent | None:
             envelope_sender=from_match.group("value") if from_match else None,
             recipient=to_match.group("value") if to_match else None,
             error=noqueue.group("code_and_text").strip(),
+        )
+
+    auth_failed = _AUTH_FAILED_RE.match(rest)
+    if auth_failed is not None:
+        detail = auth_failed.group("detail")
+        sasl_match = _SASL_USERNAME_RE.search(detail)
+        reason = _SASL_USERNAME_RE.sub("", detail).rstrip(", ").strip()
+        return LogEvent(
+            kind="reject",
+            timestamp=timestamp,
+            sasl_username=sasl_match.group("value") if sasl_match else None,
+            error=f"SASL {auth_failed.group('mechanism')} authentication failed: {reason}",
         )
 
     queue_match = _QUEUE_ID_RE.match(rest)
