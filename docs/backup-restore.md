@@ -90,12 +90,16 @@ one, not a stale copy from before the rotation.
 ## What's not covered by this procedure
 
 - **Postfix's mail queue** (in-flight messages not yet delivered) is not
-  backed up by this procedure — it lives in the `postfix` container's
-  own filesystem, not a named volume, and is expected to drain on its
-  own before any planned maintenance. If you stop the stack with mail
-  still queued, it resumes delivery attempts from where it left off once
-  `postfix` starts back up (Postfix's queue is durable across container
-  restarts as long as its filesystem layer isn't discarded).
+  backed up by this procedure — there's no explicit backup step for it —
+  but it *is* persisted, in the `postfix_queue` volume, so it survives a
+  deploy the same way the database does. If you stop the stack with mail
+  still queued (deferred, or simply paced by a rate-limited upstream
+  account — postfix-architecture.md §10), it resumes exactly where it
+  left off once `postfix` starts back up, including across a full
+  `docker compose down` + `up` that recreates the container, not just a
+  plain restart of the same one (issue #121 — before this volume
+  existed, only a plain restart was actually durable; a real deploy's
+  container recreation silently discarded whatever was still queued).
 - **`mail_log` history** is part of the database backup above like any
   other table — no separate step needed.
 - **TLS certificates** in the `postfix_tls` volume: if you've provisioned

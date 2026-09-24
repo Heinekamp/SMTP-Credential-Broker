@@ -40,6 +40,11 @@ services:
       # would correctly fail, since the underlying persistence, not just
       # the code path, is what's actually being tested here.
       - sasldb_test:/var/lib/postfix-sasldb
+      # Same fix as production's docker-compose.yml (issue #121) — same
+      # reasoning: the new queue-persistence regression test needs the
+      # real volume-backed behavior, not just the code path, to actually
+      # prove anything.
+      - postfix_queue_test:/var/spool/postfix
     environment:
       RELAY_SUBMISSION_HOST: relay-test.internal
     ports:
@@ -55,3 +60,4 @@ services:
 volumes:
   relay_config_test:
   sasldb_test:
+  postfix_queue_test:
