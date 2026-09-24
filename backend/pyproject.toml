@@ -9,21 +9,21 @@ description = "SMTP Credential Broker administration application"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.53.0",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.15.0",
-    "email-validator>=2.1",
+    "email-validator>=2.3.0",
     "argon2-cffi>=25.1.0",
     "cryptography>=42.0",
     "jinja2>=3.1",
     "typer>=0.12",
     "pyotp>=2.9",
-    "requests>=2.31",
+    "requests>=2.34.2",
     "acme>=2.9",
     "dnspython>=2.6",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +31,7 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.27",
     "time-machine>=3.5.1",
-    "ruff>=0.5",
+    "ruff>=0.16.8",
 ]
 # Only used by scripts/screenshots/ (README screenshot regeneration) —
 # never needed to run or test the app itself, so kept out of `dev`.
