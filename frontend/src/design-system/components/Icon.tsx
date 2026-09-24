@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 const PATHS: Record<string, JSX.Element> = {
   home: (
     <>
