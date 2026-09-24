@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "relay"
 version = "0.3.0"
-description = "Managed SMTP Relay administration application"
+description = "SMTP Credential Broker administration application"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
@@ -14,16 +14,16 @@ dependencies = [
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.15.0",
-    "email-validator>=2.1",
+    "email-validator>=2.3.0",
     "argon2-cffi>=25.1.0",
     "cryptography>=42.0",
     "jinja2>=3.1",
     "typer>=0.12",
     "pyotp>=2.9",
-    "requests>=2.31",
+    "requests>=2.34.2",
     "acme>=2.9",
     "dnspython>=2.6",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

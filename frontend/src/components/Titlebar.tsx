@@ -55,7 +55,7 @@ export function Titlebar() {
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600 }}>
         <BrandLogo height={28} width={28} />
-        SMTP Relay Console
+        SMTP Credential Broker
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 20, color: "var(--text-muted)" }}>

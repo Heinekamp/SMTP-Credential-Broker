@@ -2,13 +2,13 @@
 
 ## 1. Purpose and scope
 
-The Managed SMTP Relay is a self-hosted management plane around Postfix. It
+SMTP Credential Broker is a self-hosted management plane around Postfix. It
 lets a small number of externally-hosted SMTP mailboxes (e.g. STRATO accounts)
 be shared by many internal services, without ever handing those services the
 upstream credentials.
 
 ```text
-Internal services ──▶ Managed SMTP Relay ──▶ External SMTP provider(s)
+Internal services ──▶ SMTP Credential Broker ──▶ External SMTP provider(s)
                        (Web UI, API, Postfix)
 ```
 

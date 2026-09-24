@@ -125,7 +125,7 @@ def compute_active_alerts(db: Session) -> list[Alert]:
 
     app_alert = _update_alert(
         kind="app_update_available",
-        title_prefix="SMTP Manager",
+        title_prefix="SMTP Credential Broker",
         installed_version=version("relay"),
         latest_version=state.latest_app_version,
         acknowledged_version=state.app_update_acknowledged_version,

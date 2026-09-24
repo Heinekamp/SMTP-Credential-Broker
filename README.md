@@ -1,7 +1,7 @@
-# SMTP Manager
+# SMTP Credential Broker
 
-[![CI](https://github.com/Heinekamp/SMTP-Manager/actions/workflows/ci.yml/badge.svg)](https://github.com/Heinekamp/SMTP-Manager/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Heinekamp/SMTP-Manager)](https://github.com/Heinekamp/SMTP-Manager/releases)
+[![CI](https://github.com/Heinekamp/smtp-credential-broker/actions/workflows/ci.yml/badge.svg)](https://github.com/Heinekamp/smtp-credential-broker/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Heinekamp/smtp-credential-broker)](https://github.com/Heinekamp/smtp-credential-broker/releases)
 
 A self-hosted management plane around Postfix. It lets a small number of
 externally-hosted SMTP mailboxes (a STRATO account, Gmail, etc.) be shared by
@@ -10,7 +10,7 @@ needs to send mail — **without ever handing those services the real upstream
 credentials**.
 
 ```text
-Internal services ──▶ Managed SMTP Relay ──▶ External SMTP provider(s)
+Internal services ──▶ SMTP Credential Broker ──▶ External SMTP provider(s)
                        (Web UI, API, Postfix)
 ```
 
@@ -88,8 +88,8 @@ Appearance) — every screen below still works in light mode too.
 ## Quick start
 
 ```bash
-git clone https://github.com/Heinekamp/SMTP-Manager.git
-cd SMTP-Manager
+git clone https://github.com/Heinekamp/smtp-credential-broker.git
+cd smtp-credential-broker
 cp .env.example .env
 docker compose run --rm app relay generate-encryption-key   # paste the output into .env
 docker compose up -d --build

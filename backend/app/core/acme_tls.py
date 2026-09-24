@@ -182,7 +182,7 @@ class LetsEncryptAcmeIssuer:
             account_key_pem = _generate_rsa_key_pem()
         account_key = jose.JWKRSA.load(account_key_pem.encode("utf-8"))
 
-        net = client.ClientNetwork(account_key, user_agent="smtp-manager-relay/1.0")
+        net = client.ClientNetwork(account_key, user_agent="smtp-credential-broker/1.0")
         directory = messages.Directory.from_json(net.get(self.directory_url).json())
         acme_client = client.ClientV2(directory, net=net)
 
@@ -217,7 +217,7 @@ class LetsEncryptAcmeIssuer:
         net = client.ClientNetwork(
             account_key,
             account=messages.RegistrationResource(uri=pending.account_uri, body=messages.Registration()),
-            user_agent="smtp-manager-relay/1.0",
+            user_agent="smtp-credential-broker/1.0",
         )
         directory = messages.Directory.from_json(net.get(pending.directory_url).json())
         acme_client = client.ClientV2(directory, net=net)
