@@ -10,6 +10,21 @@ mkdir -p /var/log/postfix
 touch /var/log/postfix/maillog
 tail -F /var/log/postfix/maillog &
 
+# Restore local SMTP user credentials from the volume-backed copy
+# (docker-compose.yml's `sasldb` volume, SASLDB_DIR) into /etc/sasldb2 —
+# the path Cyrus SASL's sasldb auxprop plugin actually reads at AUTH
+# time, hardcoded and not redirectable at runtime (see postfix/Dockerfile's
+# comment for the two approaches that don't work and why). No-op on a
+# genuinely fresh deployment, where SASLDB_DIR doesn't have a synced copy
+# yet — /etc/sasldb2 stays the empty placeholder sasl2-bin's own postinst
+# already created. control_surface.py copies the live file back out to
+# SASLDB_DIR after every create/delete (issue #118).
+if [ -f "$SASLDB_DIR/sasldb2" ]; then
+    cp "$SASLDB_DIR/sasldb2" /etc/sasldb2
+    chown root:sasl /etc/sasldb2
+    chmod 660 /etc/sasldb2
+fi
+
 # The control surface (security-model.md §6) is the only channel `app`
 # ever uses to mutate sasldb2 or install generated config — it also now
 # owns Postfix's entire process lifecycle (see control_surface.py's
