@@ -11,11 +11,13 @@ deliberately a separate, slower, Docker-dependent harness.
 import smtplib
 import socket
 import ssl
+import subprocess
 import time
 
 import httpx
 import pytest
 from conftest import (
+    COMPOSE_FILE,
     create_local_user,
     create_sender,
     create_upstream_account,
@@ -445,3 +447,67 @@ def test_credential_rotation_old_password_fails_new_succeeds_local_user_unaffect
     client.sendmail(printer_address, ["dest@example.net"], "Subject: after\n\nb")
     client.quit()
     assert _wait_for_delivery(lambda d: d["mail_from"] == printer_address) is not None
+
+
+def _force_recreate_postfix() -> None:
+    # Exactly what a real deploy does to this container (CLAUDE.local.md's
+    # deploy procedure): stop it, remove it, start a brand new one from
+    # the same image. --no-deps leaves `app` alone — a real deploy's `app`
+    # container is what re-pushes config on its own startup
+    # (postfix-architecture.md §7); this test's push_config() call below
+    # stands in for that, since `app` itself never restarts here.
+    result = subprocess.run(
+        ["docker", "compose", "-f", COMPOSE_FILE, "up", "-d", "--force-recreate", "--no-deps", "postfix"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"failed to recreate postfix: {result.stderr}"
+
+
+def _push_config_with_retry(api: httpx.Client, *, timeout: float = 20.0) -> None:
+    # The freshly-recreated container's control surface (a fresh process,
+    # PID 1) needs a moment to bind its control socket — a push_config()
+    # attempted in that brief window fails with "control surface
+    # unreachable" (a transient 503), not a real failure.
+    deadline = time.time() + timeout
+    last_exc: Exception | None = None
+    while time.time() < deadline:
+        try:
+            push_config(api)
+            return
+        except (httpx.HTTPStatusError, AssertionError) as exc:
+            last_exc = exc
+            time.sleep(1)
+    raise AssertionError(f"push_config never succeeded after postfix recreation: {last_exc}")
+
+
+def test_local_user_password_survives_postfix_container_recreation(api: httpx.Client, uid: str) -> None:
+    """Regression test for issue #118: Cyrus SASL's sasldb2 (where local
+    SMTP AUTH credentials actually live) had no persisted volume, so it
+    lived only in the `postfix` container's own writable layer. Every real
+    deploy's `docker compose down` + `up` (`down` *removes* the container,
+    not just stops it) silently wiped every local user's credentials —
+    found in production after two deploys quietly broke every local
+    user's login, with no way to recover the password since the app's own
+    database only ever stores a one-way hash for its own bookkeeping, not
+    the credential itself (security-model.md §4). This test forces the
+    exact same container recreation a real deploy does, and proves a
+    credential created *before* still authenticates *after*."""
+    username = f"sasldb-persist-{uid}"
+    _, password = create_local_user(api, name="SASL Persistence Test", username=username)
+
+    client = _connect_submission()
+    try:
+        client.login(username, password)  # works before recreation
+    finally:
+        client.quit()
+
+    _force_recreate_postfix()
+    _push_config_with_retry(api)  # reinstalls config + starts Postfix in the fresh container
+
+    client = _connect_submission()
+    try:
+        client.login(username, password)  # must still work after recreation
+    finally:
+        client.quit()

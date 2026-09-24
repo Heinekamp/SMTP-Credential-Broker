@@ -35,6 +35,11 @@ services:
       context: ../postfix
     volumes:
       - relay_config_test:/etc/postfix/relay
+      # Same fix as production's docker-compose.yml (issue #118) — without
+      # this, test_local_user_password_survives_postfix_container_recreation
+      # would correctly fail, since the underlying persistence, not just
+      # the code path, is what's actually being tested here.
+      - sasldb_test:/var/lib/postfix-sasldb
     environment:
       RELAY_SUBMISSION_HOST: relay-test.internal
     ports:
@@ -49,3 +54,4 @@ services:
 
 volumes:
   relay_config_test:
+  sasldb_test:

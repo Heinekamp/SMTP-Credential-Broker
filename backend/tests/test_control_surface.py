@@ -43,7 +43,25 @@ def test_delete_is_a_noop_when_sasldblistusers2_shows_the_user_absent(monkeypatc
     assert len(calls) == 1
 
 
-def test_delete_calls_saslpasswd2_when_the_user_exists_and_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_sasldb_paths(monkeypatch: pytest.MonkeyPatch, tmp_path, *, seed: str = "") -> tuple[Path, Path]:
+    """Points SASLDB_PATH/SASLDB_DIR (issue #118's sync mechanism) at real
+    tmp_path locations so _sync_sasldb_to_volume's shutil.copyfile has
+    somewhere real to read from and write to — the module's own default
+    paths (/etc/sasldb2, /var/lib/postfix-sasldb) only exist inside the
+    real postfix container."""
+    sasldb_path = tmp_path / "sasldb2"
+    sasldb_path.write_text(seed, encoding="utf-8")
+    sasldb_dir = tmp_path / "sasldb-volume"
+    sasldb_dir.mkdir()
+    monkeypatch.setattr(control_surface, "SASLDB_PATH", str(sasldb_path))
+    monkeypatch.setattr(control_surface, "SASLDB_DIR", str(sasldb_dir))
+    return sasldb_path, sasldb_dir
+
+
+def test_delete_calls_saslpasswd2_when_the_user_exists_and_succeeds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _sasldb_path, sasldb_dir = _patch_sasldb_paths(monkeypatch, tmp_path, seed="db content after delete")
     calls: list[list[str]] = []
 
     def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -59,6 +77,78 @@ def test_delete_calls_saslpasswd2_when_the_user_exists_and_succeeds(monkeypatch:
 
     assert result == {"ok": True}
     assert [c[0] for c in calls] == ["sasldblistusers2", "saslpasswd2"]
+    # Issue #118: a successful delete must sync the live file out to the
+    # persisted volume, or the deleted user's absence wouldn't survive a
+    # future container recreation any more than a created user's presence
+    # would without this.
+    assert (sasldb_dir / "sasldb2").read_text(encoding="utf-8") == "db content after delete"
+
+
+def test_set_user_calls_saslpasswd2_and_syncs_to_the_persisted_volume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression test for issue #118: a created local user's credential
+    used to exist only in the postfix container's own writable layer.
+    saslpasswd2 succeeding is necessary but not sufficient — the live
+    sasldb2 file must also be synced out to the volume-backed directory
+    entrypoint.sh restores from on the container's next boot."""
+    _sasldb_path, sasldb_dir = _patch_sasldb_paths(monkeypatch, tmp_path, seed="db content after create")
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        calls.append(args)
+        assert args[:2] == ["saslpasswd2", "-c"]
+        assert input_text == "hunter2"  # never an argv — postfix-architecture.md §5
+        return _completed(0)
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._sasl_set_user({"username": "inventree", "password": "hunter2"})
+
+    assert result == {"ok": True}
+    assert len(calls) == 1
+    assert (sasldb_dir / "sasldb2").read_text(encoding="utf-8") == "db content after create"
+
+
+def test_set_user_fails_when_saslpasswd2_itself_fails(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    _patch_sasldb_paths(monkeypatch, tmp_path)
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        return _completed(1, stderr="permission denied")
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._sasl_set_user({"username": "inventree", "password": "hunter2"})
+
+    assert result["ok"] is False
+    assert "permission denied" in result["error"]
+
+
+def test_set_user_fails_when_saslpasswd2_succeeds_but_the_volume_sync_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A local user's credential existing only where saslpasswd2 itself
+    wrote it — with no durable copy — is exactly issue #118. If the sync
+    step can't complete (e.g. the persisted volume is unreachable), that
+    has to fail loudly rather than report success with a credential that
+    silently won't survive the next container recreation."""
+    monkeypatch.setattr(control_surface, "SASLDB_PATH", str(tmp_path / "sasldb2"))
+    # A directory, not a file, at SASLDB_PATH: saslpasswd2 (faked below)
+    # "succeeds" without ever writing anything real, so the later
+    # shutil.copyfile has nothing valid to read — deliberately provoking
+    # the sync failure this test exists to cover.
+    (tmp_path / "sasldb2").mkdir()
+    monkeypatch.setattr(control_surface, "SASLDB_DIR", str(tmp_path / "nonexistent-volume"))
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        return _completed(0)
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+
+    result = control_surface._sasl_set_user({"username": "inventree", "password": "hunter2"})
+
+    assert result["ok"] is False
+    assert "syncing to the persisted volume failed" in result["error"]
 
 
 def test_delete_reports_a_real_failure_from_saslpasswd2(monkeypatch: pytest.MonkeyPatch) -> None:

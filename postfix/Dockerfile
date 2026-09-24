@@ -53,6 +53,44 @@ RUN mkdir -p /usr/lib/sasl2 \
     && printf 'pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n' > /usr/lib/sasl2/smtpd.conf \
     && adduser postfix sasl
 
+# /etc/sasldb2 lived only in the container's own writable layer, with
+# nothing persisting it: every deploy's `docker compose down` + `up`
+# (`down` *removes* the container, not just stops it) silently wiped
+# every local SMTP user's credentials, with no way to recover them — the
+# app's own database only ever stores a one-way hash for its own
+# bookkeeping (security-model.md §4), never the credential itself. Found
+# in production (issue #118) after two deploys quietly broke every local
+# user's login.
+#
+# Two tempting fixes were tried and confirmed NOT to work against a real
+# build, in case a future maintainer is tempted to retry either:
+#   - A named volume can't target /etc/sasldb2 directly: Docker volumes
+#     mount *directories*, not individual files — mounting one onto a
+#     single file path fails outright at container start ("not a
+#     directory... mount a directory onto a file?").
+#   - Redirecting Cyrus SASL's own `sasldb_path` config option to a
+#     different, volume-backed directory doesn't work either: the
+#     `sasldb` auxprop plugin's *live* AUTH lookup silently ignores
+#     `sasldb_path` in /usr/lib/sasl2/smtpd.conf and always reads the
+#     compiled-in default path, even though saslpasswd2/sasldblistusers2's
+#     own `-f` flag *does* happily redirect — so writes would land in the
+#     new location while the live AUTH check kept reading the old (now
+#     permanently empty) one. A symlink at /etc/sasldb2 pointing into a
+#     volume-backed directory doesn't work either, for a different
+#     reason: saslpasswd2 creates its db file via an atomic rename, which
+#     replaces whatever sits at /etc/sasldb2 — including a symlink — with
+#     a brand new regular file, destroying the symlink on the very first
+#     write.
+#
+# So instead of redirecting Postfix at all, /etc/sasldb2 stays exactly
+# where the sasldb plugin expects it, and SASLDB_DIR (below,
+# docker-compose.yml) holds a synced copy instead: entrypoint.sh copies
+# it IN at container start (if one exists from a previous session),
+# control_surface.py copies the live file back OUT after every
+# create/delete. Postfix never needs to know any of this is happening.
+ENV SASLDB_DIR=/var/lib/postfix-sasldb
+RUN mkdir -p "$SASLDB_DIR" && chgrp sasl "$SASLDB_DIR" && chmod 770 "$SASLDB_DIR"
+
 COPY control_surface.py /control_surface.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

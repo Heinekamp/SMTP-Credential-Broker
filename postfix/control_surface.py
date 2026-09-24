@@ -8,6 +8,16 @@ sasldb2 or install generated Postfix configuration — `app` never has a
 shell in this container or direct filesystem access to `/etc/postfix` or
 `/etc/sasldb2`.
 
+`/etc/sasldb2` itself can't be redirected or symlinked (see
+postfix/Dockerfile's comment for the two approaches tried and confirmed
+not to work) — it has to stay exactly where Cyrus SASL's sasldb auxprop
+plugin expects it, since that's hardcoded and not configurable at
+runtime. So this module copies the live file out to SASLDB_DIR (a
+volume-backed directory, docker-compose.yml) after every mutation;
+entrypoint.sh copies it back in at container start. That round trip —
+not this file, not `/etc/postfix` — is what makes local SMTP user
+credentials survive a `postfix` container recreation (issue #118).
+
 Protocol: one JSON object per connection, newline-terminated, in; one JSON
 object, newline-terminated, out. See backend/app/core/postfix_control.py
 for the client side and the exact request/response shapes.
@@ -18,6 +28,7 @@ image only needs a bare `python3` package, not a virtualenv.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -25,6 +36,8 @@ import tempfile
 
 CONTROL_SOCKET_PATH = os.environ.get("CONTROL_SOCKET_PATH", "/etc/postfix/relay/control.sock")
 SASL_REALM = os.environ.get("RELAY_SUBMISSION_HOST", "smtp-relay.internal")
+SASLDB_PATH = "/etc/sasldb2"
+SASLDB_DIR = os.environ.get("SASLDB_DIR", "/var/lib/postfix-sasldb")
 POSTFIX_CONFIG_DIR = "/etc/postfix"
 RELAY_MAP_DIR = "/etc/postfix/relay"
 MAP_TYPE = "lmdb"
@@ -42,6 +55,18 @@ def _run(args: list[str], *, input_text: str | None = None) -> subprocess.Comple
     )
 
 
+def _sync_sasldb_to_volume() -> None:
+    # The other half of entrypoint.sh's copy-in — see this module's own
+    # docstring and postfix/Dockerfile's comment for why sasldb2 can't
+    # just live in (or be redirected/symlinked into) a volume directly.
+    # Raising here (rather than swallowing the error) is deliberate: a
+    # sync failure means the credential just written only exists in this
+    # container's own writable layer, silently reintroducing issue #118
+    # for that one user the moment this container is ever recreated —
+    # that has to fail the whole operation, not succeed quietly.
+    shutil.copyfile(SASLDB_PATH, os.path.join(SASLDB_DIR, "sasldb2"))
+
+
 def _sasl_set_user(payload: dict) -> dict:
     username = payload["username"]
     password = payload["password"]
@@ -53,6 +78,10 @@ def _sasl_set_user(payload: dict) -> dict:
     )
     if result.returncode != 0:
         return {"ok": False, "error": f"saslpasswd2 failed: {result.stderr.strip()}"}
+    try:
+        _sync_sasldb_to_volume()
+    except OSError as exc:
+        return {"ok": False, "error": f"saslpasswd2 succeeded but syncing to the persisted volume failed: {exc}"}
     return {"ok": True}
 
 
@@ -80,6 +109,10 @@ def _sasl_delete_user(payload: dict) -> dict:
     result = _run(["saslpasswd2", "-d", "-u", SASL_REALM, username])
     if result.returncode != 0:
         return {"ok": False, "error": f"saslpasswd2 -d failed: {result.stderr.strip()}"}
+    try:
+        _sync_sasldb_to_volume()
+    except OSError as exc:
+        return {"ok": False, "error": f"saslpasswd2 -d succeeded but syncing to the persisted volume failed: {exc}"}
     return {"ok": True}
 
 
