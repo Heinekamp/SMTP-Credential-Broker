@@ -155,7 +155,7 @@ def test_tail_maillog_detects_rotation_via_inode_even_when_the_new_file_is_alrea
     # immediately, and a filesystem is free to reuse that exact number for
     # the very next file created there — which is exactly what happened
     # under the original version of this test (flaky/wrong on Linux CI:
-    # https://github.com/Heinekamp/SMTP-Manager/issues/31 was correctly
+    # https://github.com/Heinekamp/smtp-credential-broker/issues/31 was correctly
     # fixed, but this test's own simulation of rotation was not
     # equivalent to what it claimed to simulate).
     maillog.rename(tmp_path / "maillog.1")

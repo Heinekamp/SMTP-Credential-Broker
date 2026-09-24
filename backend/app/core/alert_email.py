@@ -120,9 +120,9 @@ def send_test_alert(db: Session, *, sender: Sender, recipients: list[str], from_
     name) actually works without waiting for a real degraded/failure
     condition. Reuses _send's exact same call path, so a test send shows
     up in the Mail Log the same way a real alert would."""
-    subject = "[SMTP Manager] Test alert"
+    subject = "[SMTP Credential Broker] Test alert"
     body = (
-        "This is a test alert from your Managed SMTP Relay.\n\n"
+        "This is a test alert from your SMTP Credential Broker.\n\n"
         "If you received this, alert email is configured correctly."
     )
     return _send(db, sender, recipients, subject, body, from_name)
@@ -152,7 +152,7 @@ def _alert_email_tick_sync() -> None:
             was_active = getattr(state, active_attr)
             if now_active and not was_active:
                 matching = next((a for a in alerts if a.kind == kind), None)
-                subject = f"[SMTP Manager] {matching.title if matching else kind}"
+                subject = f"[SMTP Credential Broker] {matching.title if matching else kind}"
                 body = matching.detail if matching else ""
                 sent, _detail = _send(db, sender, recipients, subject, body, from_name)
                 if sent:
@@ -171,7 +171,7 @@ def _alert_email_tick_sync() -> None:
             if latest_version is None or latest_version == getattr(state, last_emailed_attr):
                 continue
             matching = next(a for a in alerts if a.kind == kind)
-            subject = f"[SMTP Manager] {matching.title}"
+            subject = f"[SMTP Credential Broker] {matching.title}"
             sent, _detail = _send(db, sender, recipients, subject, matching.detail, from_name)
             if sent:
                 setattr(state, last_emailed_attr, latest_version)

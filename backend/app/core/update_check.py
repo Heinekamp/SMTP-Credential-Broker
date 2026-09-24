@@ -24,7 +24,7 @@ from app.db.session import SessionLocal
 
 _logger = get_logger("update_check")
 
-_GITHUB_RELEASES_URL = "https://api.github.com/repos/Heinekamp/SMTP-Manager/releases/latest"
+_GITHUB_RELEASES_URL = "https://api.github.com/repos/Heinekamp/smtp-credential-broker/releases/latest"
 _POSTFIX_DOWNLOAD_URL = "https://www.postfix.org/download.html"
 _REQUEST_TIMEOUT_SECONDS = 10
 _CHECK_INTERVAL = datetime.timedelta(hours=24)
@@ -43,7 +43,7 @@ def check_app_update() -> str | None:
     try:
         request = urllib.request.Request(
             _GITHUB_RELEASES_URL,
-            headers={"User-Agent": "smtp-manager-update-check", "Accept": "application/vnd.github+json"},
+            headers={"User-Agent": "smtp-credential-broker-update-check", "Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read())
@@ -57,7 +57,7 @@ def check_app_update() -> str | None:
 def check_postfix_update() -> str | None:
     try:
         request = urllib.request.Request(
-            _POSTFIX_DOWNLOAD_URL, headers={"User-Agent": "smtp-manager-update-check"}
+            _POSTFIX_DOWNLOAD_URL, headers={"User-Agent": "smtp-credential-broker-update-check"}
         )
         with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
             html = response.read().decode("utf-8", errors="replace")
