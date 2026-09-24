@@ -24,7 +24,7 @@ from app.core.postfix_control import tail_maillog
 from app.models.enums import MailStatus
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
-from app.models.upstream import UpstreamAccount
+from app.models.sender import Sender
 
 _logger = get_logger("mail_log_ingest")
 
@@ -102,11 +102,15 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
         )
 
     local_user_by_username: dict[str, int] = dict(db.query(LocalSmtpUser.username, LocalSmtpUser.id).all())
-    upstream_by_host_port: dict[tuple[str, int], int] = {}
-    upstream_by_host: dict[str, int] = {}
-    for host, port, account_id in db.query(UpstreamAccount.host, UpstreamAccount.port, UpstreamAccount.id).all():
-        upstream_by_host_port[(host, port)] = account_id
-        upstream_by_host.setdefault(host, account_id)
+    # Keyed by sender address (unique per Sender), matching the exact
+    # mapping config_generator.py itself uses to pick a sender's upstream
+    # account. Deliberately *not* a host:port reverse lookup off the
+    # Postfix log line's relay= field — that's ambiguous whenever two
+    # accounts share a host:port (e.g. two mailboxes at the same
+    # provider), which silently misattributed every delivery through that
+    # host:port to a single account regardless of which sender actually
+    # sent it (issue #104).
+    upstream_by_sender: dict[str, int] = dict(db.query(Sender.address, Sender.upstream_account_id).all())
 
     for line in tail.lines:
         event = parser.parse_line(line)
@@ -150,12 +154,9 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
                 row.status = event.status
             if event.error is not None:
                 row.error = event.error
-            if event.relay_host is not None:
-                account_id = upstream_by_host_port.get((event.relay_host, event.relay_port))
-                if account_id is None:
-                    account_id = upstream_by_host.get(event.relay_host)
-                if account_id is not None:
-                    row.upstream_account_id = account_id
+            account_id = upstream_by_sender.get(row.envelope_sender)
+            if account_id is not None:
+                row.upstream_account_id = account_id
 
     state.byte_offset = tail.new_offset
     state.maillog_inode = tail.inode

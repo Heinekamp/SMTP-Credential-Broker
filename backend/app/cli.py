@@ -23,7 +23,7 @@ from app.db.session import SessionLocal
 from app.models.admin import AdminUser
 from app.models.upstream import UpstreamAccount
 
-cli = typer.Typer(help="Managed SMTP Relay administrative CLI.")
+cli = typer.Typer(help="SMTP Credential Broker administrative CLI.")
 
 
 @cli.command("create-admin")

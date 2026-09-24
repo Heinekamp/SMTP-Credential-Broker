@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Project-wide guidance for working on SMTP Manager. This is the durable,
+Project-wide guidance for working on SMTP Credential Broker. This is the durable,
 should-still-be-true-in-six-months layer — architecture, conventions, and
 hard-won gotchas. It deliberately does **not** try to enumerate every
 feature (that rots; the README's Features section and `docs/` are the

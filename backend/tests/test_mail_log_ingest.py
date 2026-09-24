@@ -10,6 +10,7 @@ from app.core.postfix_control import MaillogTail
 from app.models.enums import MailStatus, TlsMode
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
+from app.models.sender import Sender
 from app.models.upstream import UpstreamAccount
 
 _LINES = [
@@ -51,17 +52,18 @@ def _seed(db_session: Session) -> None:
     db_session.add(
         LocalSmtpUser(name="Printer Service", username="printer-service", password_hash="x", enabled=True)
     )
-    db_session.add(
-        UpstreamAccount(
-            name="STRATO printer",
-            host="upstream-stub",
-            port=2525,
-            tls_mode=TlsMode.starttls,
-            username="printer@example.com",
-            encrypted_password=b"ciphertext",
-            enabled=True,
-        )
+    account = UpstreamAccount(
+        name="STRATO printer",
+        host="upstream-stub",
+        port=2525,
+        tls_mode=TlsMode.starttls,
+        username="printer@example.com",
+        encrypted_password=b"ciphertext",
+        enabled=True,
     )
+    db_session.add(account)
+    db_session.flush()
+    db_session.add(Sender(address="printer@example.com", upstream_account_id=account.id, enabled=True))
     db_session.commit()
 
 
@@ -158,6 +160,57 @@ def test_ingest_handles_maillog_truncation(db_session: Session, _seed: None, mon
     _patch_tail(monkeypatch, _LINES, truncated=True)
     processed = ingest_new_log_lines(db_session)
     assert processed == len(_LINES)
+
+
+def test_ingest_attributes_shared_host_port_accounts_by_sender_not_relay_host(
+    db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for issue #104: two upstream accounts at the same
+    provider (same host:port, different mailboxes) must each be credited
+    with their own deliveries. Postfix's own smtp log line only ever
+    records the destination host:port, never which upstream account's
+    credentials were used, so attribution must come from the row's
+    envelope sender (via Sender.upstream_account_id) rather than a
+    host:port reverse lookup — a reverse lookup can only ever point at one
+    of the two accounts and silently misattributes the other's mail."""
+    second_account = UpstreamAccount(
+        name="STRATO noreply",
+        host="upstream-stub",
+        port=2525,
+        tls_mode=TlsMode.starttls,
+        username="noreply@example.com",
+        encrypted_password=b"ciphertext",
+        enabled=True,
+    )
+    db_session.add(second_account)
+    db_session.flush()
+    db_session.add(Sender(address="noreply@example.com", upstream_account_id=second_account.id, enabled=True))
+    db_session.commit()
+
+    second_delivery_lines = [
+        (
+            "Sep 14 10:05:00 relay postfix/submission/smtpd[9]: 4XYZ000009: client=unknown[172.20.0.1], "
+            "sasl_method=PLAIN, sasl_username=noreply-service"
+        ),
+        (
+            "Sep 14 10:05:00 relay postfix/qmgr[10]: 4XYZ000009: from=<noreply@example.com>, "
+            "size=1234, nrcpt=1 (queue active)"
+        ),
+        (
+            "Sep 14 10:05:01 relay postfix/smtp[11]: 4XYZ000009: to=<dest@example.net>, "
+            "relay=upstream-stub[172.20.0.5]:2525, delay=0.5, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as XYZ)"
+        ),
+        "Sep 14 10:05:01 relay postfix/qmgr[10]: 4XYZ000009: removed",
+    ]
+    _patch_tail(monkeypatch, [*_LINES, *second_delivery_lines])
+    ingest_new_log_lines(db_session)
+
+    printer_account = db_session.query(UpstreamAccount).filter(UpstreamAccount.name == "STRATO printer").one()
+    printer_row = db_session.query(MailLog).filter(MailLog.queue_id == "4XYZ000001").one()
+    assert printer_row.upstream_account_id == printer_account.id
+
+    noreply_row = db_session.query(MailLog).filter(MailLog.queue_id == "4XYZ000009").one()
+    assert noreply_row.upstream_account_id == second_account.id
 
 
 def test_ingest_with_unknown_sasl_user_and_upstream_leaves_fields_null(

@@ -137,7 +137,7 @@ export function NotificationsTab() {
 
       <Card title="Update Checking">
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0 }}>
-          Checks GitHub for a newer SMTP Manager release and, best-effort, postfix.org for a newer Postfix.
+          Checks GitHub for a newer SMTP Credential Broker release and, best-effort, postfix.org for a newer Postfix.
           Off by default — enabling this makes outbound calls to those sites.
         </p>
         <div style={rowStyle}>
@@ -192,7 +192,7 @@ export function NotificationsTab() {
             <Switch checked={notifyUpstream} onChange={setNotifyUpstream} />
           </div>
           <div style={rowStyle}>
-            <span style={{ fontSize: "var(--text-sm)" }}>SMTP Manager update available</span>
+            <span style={{ fontSize: "var(--text-sm)" }}>SMTP Credential Broker update available</span>
             <Switch checked={notifyAppUpdate} onChange={setNotifyAppUpdate} />
           </div>
           <div style={rowStyle}>

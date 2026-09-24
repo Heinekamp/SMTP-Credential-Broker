@@ -23,7 +23,7 @@ router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_
 
 # The name shown alongside the account in the admin's authenticator app —
 # matches the product name the frontend's title bar shows (Titlebar.tsx).
-_TOTP_ISSUER = "SMTP Relay Console"
+_TOTP_ISSUER = "SMTP Credential Broker"
 
 
 def _to_read(admin: AdminUser) -> AdminRead:

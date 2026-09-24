@@ -1,4 +1,4 @@
-# Claude Design Prompt — Managed SMTP Relay Admin UI
+# Claude Design Prompt — SMTP Credential Broker Admin UI
 
 This is the complete brief to hand to Claude Design for Phase 4 of this
 project. It describes the product, its users, its workflows, and the screens

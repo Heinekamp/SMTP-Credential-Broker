@@ -224,7 +224,7 @@ def test_update_available_sends_once_per_new_version(monkeypatch: pytest.MonkeyP
             Alert(
                 kind="app_update_available",
                 key="app_update_available",
-                title="SMTP Manager update available",
+                title="SMTP Credential Broker update available",
                 detail="0.1.0 installed, 999.0.0 available",
                 acknowledgeable=True,
             )
