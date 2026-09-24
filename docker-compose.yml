@@ -71,17 +71,28 @@ services:
       # one onto a single file path fails outright at container start
       # rather than silently doing the wrong thing. /etc/sasldb2 (the
       # path Cyrus SASL's own default, uncustomizable at runtime, always
-      # reads — see that Dockerfile's comment for why a config-level
-      # override doesn't work) is a symlink into this directory. Without
-      # this volume
-      # at all, sasldb2 lived only in the container's own writable layer
-      # and every deploy's `docker compose down` + `up` silently wiped
-      # every local SMTP user's credentials — issue #118, found in
-      # production. Unlike `postfix_tls` above and `relay_config`, this
-      # one has no self-healing fallback if lost: the app's database only
-      # ever stores a one-way hash, never the credential itself
-      # (docs/backup-restore.md).
+      # reads — see that Dockerfile's comment for why neither a
+      # config-level override nor a symlink there works) gets synced in
+      # and out of this directory by entrypoint.sh/control_surface.py.
+      # Without this volume at all, sasldb2 lived only in the container's
+      # own writable layer and every deploy's `docker compose down` + `up`
+      # silently wiped every local SMTP user's credentials — issue #118,
+      # found in production. Unlike `postfix_tls` above and
+      # `relay_config`, this one has no self-healing fallback if lost:
+      # the app's database only ever stores a one-way hash, never the
+      # credential itself (docs/backup-restore.md).
       - sasldb:/var/lib/postfix-sasldb
+      # The mail queue (deferred messages, anything paced by a
+      # rate-limited upstream account's rl_acct{id} transport —
+      # postfix-architecture.md §10) also lived only in the container's
+      # own writable layer, with the exact same consequence as sasldb2
+      # above: a deploy mid-retry or mid-pacing silently discarded real,
+      # already-accepted mail with no warning — issue #121. The full
+      # queue directory tree (active/deferred/incoming/maildrop/public/...)
+      # is already correctly created and permissioned by the postfix
+      # package itself at image build time, so this populates the same
+      # way postfix_tls's placeholder does — confirmed directly.
+      - postfix_queue:/var/spool/postfix
     environment:
       # Must match app's RELAY_SUBMISSION_HOST exactly — it's the SASL
       # realm saslpasswd2 stores credentials under, and has to agree with
@@ -107,3 +118,4 @@ volumes:
   relay_config:
   postfix_tls:
   sasldb:
+  postfix_queue:

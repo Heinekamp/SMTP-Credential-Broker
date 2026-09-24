@@ -511,3 +511,57 @@ def test_local_user_password_survives_postfix_container_recreation(api: httpx.Cl
         client.login(username, password)  # must still work after recreation
     finally:
         client.quit()
+
+
+def _wait_for_queue_entry(api: httpx.Client, predicate, timeout: float = 10.0) -> dict | None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for entry in api.get("/api/queue").json():
+            if predicate(entry):
+                return entry
+        time.sleep(0.5)
+    return None
+
+
+def test_mail_queue_survives_postfix_container_recreation(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for issue #121: the mail queue (deferred messages,
+    anything paced by a rate-limited upstream account's rl_acct{id}
+    transport — postfix-architecture.md §10) lived only in the postfix
+    container's own writable layer, so recreating it — exactly what a
+    real deploy does — silently discarded real, already-accepted mail
+    with no warning. Same class of gap as #118, just for the queue
+    instead of local SMTP credentials."""
+    printer_address = f"queue-persist-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="STRATO queue persistence", username="queue-persist@example.com", password="upstream-pass"
+    )
+    # A tight rate limit (1/hour = a ~3600s pacing delay between
+    # deliveries to this account's destination) reliably keeps a second
+    # message sitting in the queue for this whole test, rather than
+    # racing a real network timeout to get something genuinely stuck.
+    api.patch(f"/api/upstream-accounts/{account_id}", json={"rate_limit_per_hour": 1}).raise_for_status()
+    sender_id = create_sender(api, address=printer_address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Queue Persistence Test", username=f"queue-persist-user-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    push_config(api)  # installs the rl_acct{id} transport and restarts postfix to activate pacing
+
+    client = _connect_submission()
+    client.login(f"queue-persist-user-{uid}", password)
+    client.sendmail(printer_address, ["dest1@example.net"], "Subject: first\n\nfirst message")
+    client.sendmail(printer_address, ["dest2@example.net"], "Subject: second\n\nsecond message")
+    client.quit()
+
+    # The first message delivers (or starts delivering) promptly since
+    # there's no prior delivery to this destination to pace against yet;
+    # the second is what the rate limit actually holds back.
+    queued = _wait_for_queue_entry(api, lambda e: e["sender"] == printer_address, timeout=10.0)
+    assert queued is not None, "expected a paced message to still be in the queue before recreation"
+    queue_id_before = queued["queue_id"]
+
+    _force_recreate_postfix()
+    _push_config_with_retry(api)
+
+    queue_after = api.get("/api/queue").json()
+    assert any(e["queue_id"] == queue_id_before for e in queue_after), (
+        f"queued message {queue_id_before} did not survive postfix container recreation: {queue_after}"
+    )
