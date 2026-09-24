@@ -1,0 +1,65 @@
+name: Publish Docker images
+
+# Runs only when a GitHub Release is published (see docs/upgrading.md's
+# "docker compose pull" path — issue #38: that line existed before this
+# workflow did, describing a path that didn't actually exist yet). Not
+# triggered on every push/tag: compose-smoke (ci.yml) already validates
+# both images build on every push, so this job's only job is publishing,
+# not re-validating buildability.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # Hardcoded lowercase rather than lowercasing github.repository_owner
+  # ("Heinekamp") via a shell step — GHCR/Docker image names must be
+  # all-lowercase, and workflow expressions have no built-in case
+  # conversion. This is the one place that casing has to be spelled out.
+  IMAGE_BASE: ghcr.io/heinekamp/smtp-credential-broker
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: app
+            context: .
+            dockerfile: backend/Dockerfile
+          - image: postfix
+            context: ./postfix
+            dockerfile: ./postfix/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: version
+        # The release tag is "vX.Y.Z" (CLAUDE.md's release convention);
+        # the published image tag is the bare version, matching
+        # backend/pyproject.toml and frontend/package.json.
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_REF_NAME: ${{ github.event.release.tag_name }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:${{ steps.version.outputs.value }}
+            ${{ env.IMAGE_BASE }}/${{ matrix.image }}:latest
