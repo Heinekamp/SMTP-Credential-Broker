@@ -84,9 +84,11 @@ host/port/username to give it; the password is whatever was shown at
 creation/regeneration time. The relay's own TLS certificate is a
 self-signed placeholder baked into the `postfix` image by default — most
 real clients (e.g. PHPMailer-based mailers) reject this during STARTTLS.
-See [configuration.md](configuration.md#tls-certificates) for provisioning
-a real, auto-renewing certificate from Settings → TLS Certificate, or
-mounting one manually.
+Settings → TLS Certificate can provision a real, auto-renewing
+certificate instead, via a Cloudflare API token scoped to
+`Zone:DNS:Edit` on the domain's zone (or manually, for any other DNS
+host) — see [configuration.md](configuration.md#tls-certificates) for
+the full walkthrough, or mount a certificate directly.
 
 ## Exposed ports
 
