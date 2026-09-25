@@ -1,5 +1,9 @@
 # Installation
 
+New to this? See [Getting Started](getting-started.md) for a fuller
+walkthrough with explanations of each step. This page is the terse
+reference version, for anyone already comfortable with Docker.
+
 Requires Docker and Docker Compose (v2, the `docker compose` subcommand —
 not the standalone `docker-compose` v1 binary). No other host dependencies;
 Postfix, Python, and the SPA all run inside the two containers this stack

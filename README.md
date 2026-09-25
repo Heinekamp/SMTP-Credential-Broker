@@ -99,8 +99,13 @@ Then open `http://<host>:8000/` to create the first admin account. See
 [docs/installation.md](docs/installation.md) for the full walkthrough
 (TLS, exposed ports, first-run setup).
 
+New to Docker or self-hosting? Start with
+[docs/getting-started.md](docs/getting-started.md) instead — a slower,
+fully explained walkthrough that assumes no prior experience.
+
 ## Documentation
 
+- [Getting started](docs/getting-started.md)
 - [Installation](docs/installation.md)
 - [Configuration reference](docs/configuration.md)
 - [Backup & restore](docs/backup-restore.md)
