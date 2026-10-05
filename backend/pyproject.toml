@@ -21,7 +21,7 @@ dependencies = [
     "typer>=0.27.2",
     "pyotp>=2.9",
     "requests>=2.34.2",
-    "acme>=2.9",
+    "acme>=5.8.0",
     "dnspython>=2.8.0",
     "python-multipart>=0.0.32",
 ]
