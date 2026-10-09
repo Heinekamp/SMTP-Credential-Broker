@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button, Card, Select, StatusBadge, TextInput } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { parseApiDate } from "../../lib/apiDate";
 import { listLocalUsers } from "../../lib/api/localUsers";
-import { listMailLog, type MailStatus } from "../../lib/api/mailLog";
+import { listMailLog, MAIL_STATUSES, type MailStatus } from "../../lib/api/mailLog";
 import { listUpstreamAccounts } from "../../lib/api/upstreamAccounts";
 import { MAIL_STATUS_BADGE } from "./statusMapping";
 
@@ -33,7 +33,13 @@ function useDebounced<T>(value: T, delayMs: number): T {
 export function MailLogList() {
   const navigate = useNavigate();
 
-  const [status, setStatus] = useState<MailStatus | "all">("all");
+  // Initialised from ?status= so the Dashboard's failure links land on a
+  // filtered list rather than everything (#205).
+  const [searchParams] = useSearchParams();
+  const requestedStatus = searchParams.get("status");
+  const [status, setStatus] = useState<MailStatus | "all">(
+    MAIL_STATUSES.find((s) => s === requestedStatus) ?? "all",
+  );
   const [senderFilter, setSenderFilter] = useState("");
   const [recipientFilter, setRecipientFilter] = useState("");
   const [localUserId, setLocalUserId] = useState("");

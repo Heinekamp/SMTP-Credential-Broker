@@ -122,3 +122,37 @@ def test_unreachable_control_surface_still_serves_stale_data(
     response = admin_client.get("/api/mail-log")
     assert response.status_code == 200
     assert response.json()["total"] == 1
+
+
+def test_a_single_entry_is_fetchable_by_id_however_old(admin_client: TestClient, db_session: Session) -> None:
+    """Regression test for #205: the detail view used to search only the
+    200 newest rows, so details for anything older failed."""
+    import datetime
+
+    from app.models.enums import MailStatus
+    from app.models.mail_log import MailLog
+
+    old = MailLog(
+        queue_id="OLDQUEUEID1",
+        timestamp=datetime.datetime(2020, 1, 1),
+        envelope_sender="old@example.com",
+        recipients=["dest@example.net"],
+        status=MailStatus.sent,
+    )
+    db_session.add(old)
+    db_session.add_all(
+        MailLog(
+            queue_id=f"NEW{i:08d}",
+            timestamp=datetime.datetime(2026, 1, 1),
+            envelope_sender="new@example.com",
+            recipients=["d@example.net"],
+            status=MailStatus.sent,
+        )
+        for i in range(250)
+    )
+    db_session.commit()
+
+    response = admin_client.get(f"/api/mail-log/{old.id}")
+    assert response.status_code == 200
+    assert response.json()["queue_id"] == "OLDQUEUEID1"
+    assert admin_client.get("/api/mail-log/999999").status_code == 404

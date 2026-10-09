@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, Card, StatusBadge } from "../../design-system/components";
 import { parseApiDate } from "../../lib/apiDate";
 import { listLocalUsers } from "../../lib/api/localUsers";
-import { listMailLog } from "../../lib/api/mailLog";
+import { getMailLogEntry } from "../../lib/api/mailLog";
 import { listUpstreamAccounts } from "../../lib/api/upstreamAccounts";
 import { MAIL_STATUS_BADGE } from "./statusMapping";
 
@@ -17,20 +17,25 @@ export function MailLogDetail() {
   const entryId = Number(params.id);
   const navigate = useNavigate();
 
-  // Shares the same query key/cache as the list screen — no separate
-  // by-id endpoint exists (or is needed): the list response already
-  // carries every field this view shows.
-  const { data } = useQuery({ queryKey: ["mail-log", "recent"], queryFn: () => listMailLog({ limit: 200 }) });
+  // Fetched by id: looking it up in a window of the 200 newest rows
+  // failed for every older entry the paged list can link to (#205).
+  const { data: entry, isLoading } = useQuery({
+    queryKey: ["mail-log", "entry", entryId],
+    queryFn: () => getMailLogEntry(entryId),
+    retry: false,
+  });
   const { data: localUsers } = useQuery({ queryKey: ["local-users"], queryFn: listLocalUsers });
   const { data: upstreamAccounts } = useQuery({ queryKey: ["upstream-accounts"], queryFn: listUpstreamAccounts });
 
-  const entry = data?.entries.find((e) => e.id === entryId);
+  if (isLoading) {
+    return <p style={{ color: "var(--text-muted)" }}>Loading…</p>;
+  }
 
   if (!entry) {
     return (
       <Card style={{ maxWidth: 560 }}>
         <p style={{ margin: 0, color: "var(--text-muted)" }}>
-          This entry isn't in the currently loaded mail log window.
+          This mail log entry no longer exists — it may have been removed by the retention setting.
         </p>
         <Button variant="default" onClick={() => navigate("/mail-log")} style={{ marginTop: 16 }}>
           Back to Mail Log
