@@ -184,3 +184,30 @@ def test_tick_calls_sync_before_checking_renewal_due_status(monkeypatch: pytest.
     asyncio.run(cert_renewal_tick())
 
     assert sync_calls == [1]
+
+
+def test_tick_records_the_check_before_attempting_issuance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for #181: if issuance raises, the 'last checked'
+    time must already be committed — it used to be rolled back with the
+    failed attempt, so the next tick a minute later placed another full
+    ACME order, burning through Let's Encrypt's rate limits."""
+    db = SessionLocal()
+    _configure_enabled(db)
+    db.close()
+    monkeypatch.setattr("app.core.cert_renewal.sync_certificate_to_postfix", lambda db: None)
+    attempts: list[int] = []
+
+    def _explode(db, **kwargs):
+        attempts.append(1)
+        raise RuntimeError("postfix went away mid-issuance")
+
+    monkeypatch.setattr("app.core.cert_renewal.issue_or_renew", _explode)
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(cert_renewal_tick())
+    asyncio.run(cert_renewal_tick())  # a minute later: must be gated, not retried
+
+    assert attempts == [1]
+    db = SessionLocal()
+    assert get_background_job_state(db).cert_renewal_last_checked_at is not None
+    db.close()

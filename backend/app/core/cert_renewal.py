@@ -47,6 +47,10 @@ def _cert_renewal_tick_sync() -> None:
             return
 
         state.cert_last_renewal_attempt_at = utcnow()
+        # Recorded *before* the attempt: if anything below raises, the 24h
+        # gate must still be closed — otherwise the next tick, a minute
+        # later, places another full ACME order (#181).
+        db.commit()
         result = issue_or_renew(db)
         if result.success:
             state.cert_last_renewal_error = None

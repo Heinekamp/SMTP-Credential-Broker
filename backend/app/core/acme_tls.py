@@ -295,8 +295,24 @@ def _finish_issuance(
     """Shared tail of a successful ACME issuance: installs the cert on the
     live Postfix, and only then records it as the source of truth. Used
     by both the automatic (issue_or_renew) and manual
-    (finalize_manual_dns_challenge) paths."""
-    install_result = postfix_control.install_tls_certificate(cert_pem=issued.cert_pem, key_pem=issued.key_pem)
+    (finalize_manual_dns_challenge) paths.
+
+    If Postfix can't be *reached*, the certificate is still saved: it's
+    valid, and throwing it away meant the renewal tick re-issued a new one
+    every minute until Let's Encrypt's rate limits locked renewal out for a
+    week (#181). sync_certificate_to_postfix installs it once Postfix is
+    back. A certificate a reachable Postfix *rejects* is still never saved."""
+    try:
+        install_result = postfix_control.install_tls_certificate(cert_pem=issued.cert_pem, key_pem=issued.key_pem)
+    except PostfixControlError as exc:
+        _record_issued_certificate(
+            db, domain=domain, issued=issued, account_key_pem=account_key_pem, account_uri=account_uri
+        )
+        detail = (
+            f"Issued and saved, but Postfix couldn't be reached to install it ({exc}). It will be installed "
+            "automatically once Postfix is back (at the next app start or daily renewal check)."
+        )
+        return CertificateIssuanceResult(success=False, detail=detail, not_after=issued.not_after)
     if not install_result.success:
         # ACME succeeded but Postfix rejected it (shouldn't happen given
         # the control surface's own validation, but never persist a
@@ -306,17 +322,9 @@ def _finish_issuance(
         detail = f"Issued but Postfix rejected it: {install_result.detail}"
         return CertificateIssuanceResult(success=False, detail=detail)
 
-    state = get_tls_certificate_state(db)
-    state.source = "lets_encrypt"
-    state.domain = domain
-    state.cert_pem = issued.cert_pem
-    state.encrypted_key_pem = encrypt_secret(issued.key_pem)
-    state.not_before = issued.not_before
-    state.not_after = issued.not_after
-    state.issued_at = utcnow()
-    state.acme_account_key_encrypted = encrypt_secret(account_key_pem)
-    state.acme_account_uri = account_uri
-
+    _record_issued_certificate(
+        db, domain=domain, issued=issued, account_key_pem=account_key_pem, account_uri=account_uri
+    )
     # Clears a previously-recorded failure regardless of whether this
     # success came from the background tick or a manual "Issue/Renew
     # Now"/"Verify & Continue" click — a resolved problem must not keep
@@ -327,6 +335,21 @@ def _finish_issuance(
     get_background_job_state(db).cert_last_renewal_error = None
 
     return CertificateIssuanceResult(success=True, detail="Issued.", not_after=issued.not_after)
+
+
+def _record_issued_certificate(
+    db: Session, *, domain: str, issued: IssuedCertificate, account_key_pem: str, account_uri: str
+) -> None:
+    state = get_tls_certificate_state(db)
+    state.source = "lets_encrypt"
+    state.domain = domain
+    state.cert_pem = issued.cert_pem
+    state.encrypted_key_pem = encrypt_secret(issued.key_pem)
+    state.not_before = issued.not_before
+    state.not_after = issued.not_after
+    state.issued_at = utcnow()
+    state.acme_account_key_encrypted = encrypt_secret(account_key_pem)
+    state.acme_account_uri = account_uri
 
 
 def issue_or_renew(db: Session, *, issuer: AcmeIssuer | None = None) -> CertificateIssuanceResult:

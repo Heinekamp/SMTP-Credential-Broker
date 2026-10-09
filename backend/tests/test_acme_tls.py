@@ -480,3 +480,28 @@ def test_finalize_manual_dns_challenge_clears_the_pending_row_on_an_acme_failure
     assert result.success is False
     assert "order is invalid" in result.detail
     assert get_tls_pending_manual_challenge(db_session) is None
+
+
+def test_issue_or_renew_saves_the_certificate_when_postfix_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Regression test for #181: the PostfixControlError used to escape,
+    discarding a freshly issued certificate — and the renewal tick then
+    re-issued every minute until Let's Encrypt's rate limits blocked it.
+    The certificate must be kept; sync_certificate_to_postfix installs it
+    once Postfix is back."""
+    _configure(db_session)
+
+    def _unreachable(**kwargs):
+        raise PostfixControlError("Could not reach the Postfix control surface")
+
+    monkeypatch.setattr(acme_tls.postfix_control, "install_tls_certificate", _unreachable)
+
+    result = acme_tls.issue_or_renew(db_session, issuer=_FakeIssuer())
+
+    assert result.success is False
+    assert "Issued and saved" in result.detail
+    state = get_tls_certificate_state(db_session)
+    assert state.source == "lets_encrypt"
+    assert state.cert_pem == "CERT-PEM"
+    assert decrypt_secret(state.encrypted_key_pem) == "KEY-PEM"
