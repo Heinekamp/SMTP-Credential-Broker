@@ -23,6 +23,12 @@ _ENV = jinja2.Environment(
 )
 
 
+# Where the postfix image's ca-certificates package puts the system trust
+# store — main.cf's smtp_tls_CAfile unless settings.upstream_tls_ca_file
+# overrides it.
+_DEBIAN_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
 def _tab_join(*fields: str) -> str:
     return "\t".join(fields)
 
@@ -79,7 +85,7 @@ def _rate_limited_account_transports(db: Session) -> list[RateLimitedAccountTran
 
 
 def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
-    """Renders the four lookup-map source files
+    """Renders the five lookup-map source files
     (postfix-architecture.md §4) plus a list of human-readable warnings for
     senders that can't currently produce a working map entry (e.g. their
     upstream account is disabled) — an invariant worth surfacing, not
@@ -98,6 +104,11 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
     # sender missing from this map bounces instead of being delivered
     # direct-to-MX (#151).
     sender_transport_lines: list[str] = []
+    # smtp_tls_policy_maps is keyed by nexthop, i.e. per upstream account
+    # (host:port), not per sender — several senders can share one account.
+    # main.cf's default level is `secure` (verify the certificate and the
+    # hostname); only accounts that explicitly opted out get `encrypt`.
+    tls_policy: dict[str, str] = {}
     for sender in enabled_senders_with_upstream(db):
         account = sender.upstream_account
         relayhost_lines.append(_tab_join(sender.address, f"[{account.host}]:{account.port}"))
@@ -107,6 +118,8 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
         # actual host:port via sender_dependent_relayhost_maps above,
         # this only selects which transport handles the sender.
         sender_transport_lines.append(_tab_join(sender.address, f"{_transport_name_for(account)}:"))
+        if account.tls_skip_verify:
+            tls_policy[f"[{account.host}]:{account.port}"] = "encrypt"
 
     all_senders = db.execute(select(Sender)).scalars().all()
     working_addresses = {s.address for s in enabled_senders_with_upstream(db)}
@@ -124,6 +137,7 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
         "sender_relayhost": "\n".join(relayhost_lines) + ("\n" if relayhost_lines else ""),
         "sasl_passwd": "\n".join(sasl_passwd_lines) + ("\n" if sasl_passwd_lines else ""),
         "sender_transport": "\n".join(sender_transport_lines) + ("\n" if sender_transport_lines else ""),
+        "tls_policy": "".join(f"{_tab_join(nexthop, level)}\n" for nexthop, level in sorted(tls_policy.items())),
     }
     return maps, warnings
 
@@ -134,6 +148,7 @@ def _render_config(db: Session) -> tuple[str, str]:
         myhostname=settings.submission_host,
         mydomain=settings.submission_host,
         policy_service_port=settings.policy_service_port,
+        upstream_tls_ca_file=settings.upstream_tls_ca_file or _DEBIAN_CA_BUNDLE,
     )
     master_cf = _ENV.get_template("master.cf.j2").render(
         rate_limited_accounts=_rate_limited_account_transports(db),

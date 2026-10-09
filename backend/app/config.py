@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     # never published to the host.
     policy_service_port: int = 10030
 
+    # CA bundle that upstream SMTP servers' certificates are verified
+    # against, by both Postfix (main.cf's smtp_tls_CAfile) and the app's own
+    # upstream connections (Test Connection, scheduled tests, alert email).
+    # None = the system trust store: Debian's bundle for Postfix, OpenSSL's
+    # default paths for the app. Set it only for an upstream behind a
+    # private CA, and then the same path must exist in both the `app` and
+    # `postfix` containers. Per-account opt-out of verification is
+    # UpstreamAccount.tls_skip_verify.
+    upstream_tls_ca_file: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
