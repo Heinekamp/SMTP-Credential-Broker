@@ -1,11 +1,16 @@
 import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+# New admin passwords only — existing ones keep working (#169). Shared
+# with schemas/auth.py's SetupRequest and the CLI's create-admin /
+# reset-admin-password.
+MIN_ADMIN_PASSWORD_LENGTH = 12
 
 
 class AdminCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=MIN_ADMIN_PASSWORD_LENGTH)
 
 
 class AdminRead(BaseModel):
@@ -30,7 +35,7 @@ class AdminUpdate(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(min_length=MIN_ADMIN_PASSWORD_LENGTH)
 
 
 class TotpEnrollResponse(BaseModel):
@@ -44,5 +49,16 @@ class TotpEnrollResponse(BaseModel):
 
 
 class TotpConfirmRequest(BaseModel):
-    secret: str
+    # Base32, as pyotp.random_base32() produces in /me/totp/enroll — a
+    # malformed secret used to crash base32 decoding with a 500 (#169).
+    secret: str = Field(pattern=r"^[A-Z2-7]{16,128}$")
     code: str
+    # Re-authentication: a stolen session alone must not be able to put its
+    # own authenticator on the account (#169).
+    current_password: str
+
+
+class TotpRemoveRequest(BaseModel):
+    # Re-authentication: a stolen session alone must not be able to strip
+    # the account's second factor (#169).
+    current_password: str

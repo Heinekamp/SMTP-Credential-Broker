@@ -157,7 +157,17 @@ confused.
 - **TOTP (optional)**: `pyotp`-based TOTP, off by default, enabled per-admin.
   Secrets stored encrypted the same way upstream passwords are (§2) — a TOTP
   secret is exactly as sensitive as a password and gets the same treatment,
-  not a weaker one.
+  not a weaker one. A code is accepted for its own 30-second step or one
+  step either side (clock drift), and **only once**: the last accepted step
+  is stored per admin (`admin_users.totp_last_used_step`), so an observed
+  code can't be replayed (#169).
+- **Re-authentication for account-security changes**: changing your
+  password, confirming a new TOTP enrolment and removing TOTP all require
+  the current password, so a stolen session alone can't take over or
+  downgrade the account. Those checks go through the login rate limiter,
+  and a wrong password counts as a failed login. New admin passwords
+  (setup, add admin, change password, and the CLI's `create-admin` and
+  `reset-admin-password`) must be at least 12 characters (#169).
 - **Logout**: invalidates the server-side session record immediately (not
   just cookie deletion, which wouldn't stop a stolen token from being reused).
 

@@ -1,4 +1,3 @@
-import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -10,6 +9,7 @@ from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, de
 from app.core.rate_limit import check_rate_limit, login_lock, record_login_attempt
 from app.core.security import hash_password, verify_password
 from app.core.sessions import create_session, revoke_session
+from app.core.totp import verify_totp
 from app.models.admin import AdminUser
 from app.schemas.auth import LoginRequest, LoginResponse, SessionInfo, SetupRequest, SetupRequiredResponse
 
@@ -106,7 +106,8 @@ def _login(payload: LoginRequest, request: Request, response: Response, db: Sess
         except (EncryptionKeyNotConfigured, DecryptionFailed) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-        if not pyotp.TOTP(secret).verify(payload.totp_code, valid_window=1):
+        step = verify_totp(secret, payload.totp_code, last_used_step=admin.totp_last_used_step)
+        if step is None:
             # Brute-forcing the code is covered by the same rate limiter as
             # brute-forcing the password — this is the only place a wrong
             # TOTP code is actually checked, so without this the "totp
@@ -116,6 +117,10 @@ def _login(payload: LoginRequest, request: Request, response: Response, db: Sess
             )
             db.commit()
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code")
+
+        # A code is good for one login only — the same code (or an older
+        # one) can't be replayed within its validity window (#169).
+        admin.totp_last_used_step = step
 
     admin.last_login_at = utcnow()
     record_login_attempt(

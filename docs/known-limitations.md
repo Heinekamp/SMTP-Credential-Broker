@@ -36,7 +36,7 @@ doesn't escalate further, and there's no eventual hard lockout, alerting, or
 CAPTCHA-style backoff growth.
 
 This still throttles a TOTP brute force to roughly 4 attempts/hour per
-source IP indefinitely, against a 6-digit code with `valid_window=1` (~333k
+source IP indefinitely, against a 6-digit code accepted for 3 time steps (~333k
 valid values) — slow enough to be low risk today, not urgent to change.
 Attempts are evaluated strictly one at a time (#157), so parallel requests
 can't multiply that rate. Guessing spread across many source IPs is capped

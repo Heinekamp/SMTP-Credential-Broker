@@ -2,8 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { Button, Card, TextInput } from "../design-system/components";
-import { ApiError } from "../lib/apiClient";
-import { confirmTotp, enrollTotp } from "../lib/api/admins";
+import { accountErrorMessage, confirmTotp, enrollTotp } from "../lib/api/admins";
 
 export interface TotpEnrollModalProps {
   onDone: () => void;
@@ -22,6 +21,7 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
   const [secret, setSecret] = useState<string | null>(null);
   const [otpauthUri, setOtpauthUri] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -38,10 +38,10 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
     setError(null);
     setSubmitting(true);
     try {
-      await confirmTotp(secret, code);
+      await confirmTotp(secret, code, currentPassword);
       onDone();
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? "Invalid code — check your authenticator app and try again." : "Could not enable TOTP.");
+      setError(accountErrorMessage(err, "Could not enable TOTP."));
     } finally {
       setSubmitting(false);
     }
@@ -122,15 +122,24 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               autoFocus
-              style={{ width: "100%", marginBottom: 16 }}
+              style={{ width: "100%", marginBottom: 12 }}
               aria-label="Authentication code"
+            />
+            <TextInput
+              type="password"
+              placeholder="Current password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              style={{ width: "100%", marginBottom: 16 }}
+              aria-label="Current password"
             />
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <Button type="button" variant="default" onClick={onCancel} disabled={submitting}>
                 Cancel
               </Button>
-              <Button type="submit" variant="accent" disabled={submitting || !code}>
+              <Button type="submit" variant="accent" disabled={submitting || !code || !currentPassword}>
                 Verify &amp; Enable
               </Button>
             </div>

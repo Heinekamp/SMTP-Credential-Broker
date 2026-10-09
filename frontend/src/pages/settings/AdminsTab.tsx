@@ -7,7 +7,15 @@ import { ChangePasswordModal } from "../../components/ChangePasswordModal";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { TotpEnrollModal } from "../../components/TotpEnrollModal";
 import { ApiError } from "../../lib/apiClient";
-import { createAdmin, listAdmins, removeTotp, setAdminActive, type AdminRead } from "../../lib/api/admins";
+import {
+  accountErrorMessage,
+  createAdmin,
+  listAdmins,
+  MIN_ADMIN_PASSWORD_LENGTH,
+  removeTotp,
+  setAdminActive,
+  type AdminRead,
+} from "../../lib/api/admins";
 import { useSession } from "../../lib/useSession";
 
 const QUERY_KEY = ["admins"];
@@ -29,6 +37,7 @@ export function AdminsTab() {
   const [enrollingTotp, setEnrollingTotp] = useState(false);
   const [removingTotp, setRemovingTotp] = useState(false);
   const [removeTotpError, setRemoveTotpError] = useState<string | null>(null);
+  const [removeTotpPassword, setRemoveTotpPassword] = useState("");
   const [deactivateTarget, setDeactivateTarget] = useState<AdminRead | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
@@ -47,16 +56,15 @@ export function AdminsTab() {
   });
 
   const remove = useMutation({
-    mutationFn: () => removeTotp(),
+    mutationFn: () => removeTotp(removeTotpPassword),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setRemovingTotp(false);
       setRemoveTotpError(null);
+      setRemoveTotpPassword("");
     },
     onError: (err) => {
-      setRemoveTotpError(
-        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not remove TOTP.",
-      );
+      setRemoveTotpError(accountErrorMessage(err, "Could not remove TOTP."));
     },
   });
 
@@ -105,9 +113,11 @@ export function AdminsTab() {
             />
             <TextInput
               type="password"
-              placeholder="Password"
+              placeholder={`Password (at least ${MIN_ADMIN_PASSWORD_LENGTH} characters)`}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              minLength={MIN_ADMIN_PASSWORD_LENGTH}
+              required
               style={{ width: "100%", marginBottom: 14 }}
               aria-label="New admin password"
             />
@@ -223,14 +233,33 @@ export function AdminsTab() {
       {removingTotp && (
         <ConfirmModal
           title="Remove TOTP?"
-          body="This lowers account security — anyone with your password alone will be able to sign in."
+          body={
+            <>
+              <p style={{ marginTop: 0 }}>
+                This lowers account security — anyone with your password alone will be able to sign in. Enter your
+                current password to confirm.
+              </p>
+              <TextInput
+                type="password"
+                placeholder="Current password"
+                value={removeTotpPassword}
+                onChange={(e) => setRemoveTotpPassword(e.target.value)}
+                autoComplete="current-password"
+                autoFocus
+                style={{ width: "100%" }}
+                aria-label="Current password"
+              />
+            </>
+          }
           confirmLabel="Remove"
           variant="danger"
           confirming={remove.isPending}
+          confirmDisabled={!removeTotpPassword}
           error={removeTotpError}
           onCancel={() => {
             setRemovingTotp(false);
             setRemoveTotpError(null);
+            setRemoveTotpPassword("");
           }}
           onConfirm={() => remove.mutate()}
         />

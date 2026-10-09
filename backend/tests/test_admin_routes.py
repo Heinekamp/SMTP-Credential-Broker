@@ -1,3 +1,5 @@
+import time
+
 import pyotp
 from fastapi.testclient import TestClient
 
@@ -198,7 +200,7 @@ def test_totp_confirm_with_wrong_code_is_401_and_does_not_enable(admin_client: T
     enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
     response = admin_client.post(
         "/api/admins/me/totp/confirm",
-        json={"secret": enroll["secret"], "code": "000000"},
+        json={"secret": enroll["secret"], "code": "000000", "current_password": ADMIN_PASSWORD},
         headers=csrf_headers(admin_client),
     )
     assert response.status_code == 401
@@ -213,7 +215,7 @@ def test_totp_confirm_with_correct_code_enables_it(admin_client: TestClient) -> 
     code = pyotp.TOTP(enroll["secret"]).now()
     response = admin_client.post(
         "/api/admins/me/totp/confirm",
-        json={"secret": enroll["secret"], "code": code},
+        json={"secret": enroll["secret"], "code": code, "current_password": ADMIN_PASSWORD},
         headers=csrf_headers(admin_client),
     )
     assert response.status_code == 204
@@ -228,11 +230,15 @@ def test_totp_remove_disables_it(admin_client: TestClient) -> None:
     code = pyotp.TOTP(enroll["secret"]).now()
     admin_client.post(
         "/api/admins/me/totp/confirm",
-        json={"secret": enroll["secret"], "code": code},
+        json={"secret": enroll["secret"], "code": code, "current_password": ADMIN_PASSWORD},
         headers=csrf_headers(admin_client),
     )
 
-    response = admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
+    response = admin_client.post(
+        "/api/admins/me/totp/remove",
+        json={"current_password": ADMIN_PASSWORD},
+        headers=csrf_headers(admin_client),
+    )
     assert response.status_code == 204
 
 
@@ -241,18 +247,25 @@ def test_totp_remove_revokes_other_sessions_but_keeps_this_one(admin_client: Tes
     code = pyotp.TOTP(enroll["secret"]).now()
     admin_client.post(
         "/api/admins/me/totp/confirm",
-        json={"secret": enroll["secret"], "code": code},
+        json={"secret": enroll["secret"], "code": code, "current_password": ADMIN_PASSWORD},
         headers=csrf_headers(admin_client),
     )
 
+    # The enrolment code is spent (#169's replay protection) — log in with
+    # the next step's code, still inside the accepted drift window.
+    next_code = pyotp.TOTP(enroll["secret"]).at(int(time.time()) + 30)
     other_client = TestClient(app)
     login = other_client.post(
-        "/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "totp_code": code}
+        "/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "totp_code": next_code}
     )
     assert login.status_code == 200
     assert other_client.get("/api/admins").status_code == 200
 
-    response = admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
+    response = admin_client.post(
+        "/api/admins/me/totp/remove",
+        json={"current_password": ADMIN_PASSWORD},
+        headers=csrf_headers(admin_client),
+    )
     assert response.status_code == 204
 
     assert other_client.get("/api/admins").status_code == 401
@@ -261,3 +274,100 @@ def test_totp_remove_revokes_other_sessions_but_keeps_this_one(admin_client: Tes
     admins = admin_client.get("/api/admins").json()
     me = next(a for a in admins if a["email"] == ADMIN_EMAIL)
     assert me["totp_enabled"] is False
+
+
+# ── Account-security re-authentication and limits (#169) ──────────────
+
+
+def _enable_totp(client: TestClient) -> str:
+    enroll = client.post("/api/admins/me/totp/enroll", headers=csrf_headers(client)).json()
+    response = client.post(
+        "/api/admins/me/totp/confirm",
+        json={
+            "secret": enroll["secret"],
+            "code": pyotp.TOTP(enroll["secret"]).now(),
+            "current_password": ADMIN_PASSWORD,
+        },
+        headers=csrf_headers(client),
+    )
+    assert response.status_code == 204
+    return enroll["secret"]
+
+
+def _totp_enabled(client: TestClient) -> bool:
+    return next(a for a in client.get("/api/admins").json() if a["email"] == ADMIN_EMAIL)["totp_enabled"]
+
+
+def test_totp_remove_requires_the_current_password(admin_client: TestClient) -> None:
+    """A stolen session alone must not be able to strip the second factor."""
+    _enable_totp(admin_client)
+    no_password = admin_client.post("/api/admins/me/totp/remove", json={}, headers=csrf_headers(admin_client))
+    assert no_password.status_code == 422
+    wrong = admin_client.post(
+        "/api/admins/me/totp/remove", json={"current_password": "wrong"}, headers=csrf_headers(admin_client)
+    )
+    assert wrong.status_code == 401
+    assert _totp_enabled(admin_client) is True
+
+
+def test_totp_confirm_requires_the_current_password(admin_client: TestClient) -> None:
+    """A stolen session alone must not be able to enrol its own authenticator."""
+    enroll = admin_client.post("/api/admins/me/totp/enroll", headers=csrf_headers(admin_client)).json()
+    response = admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": enroll["secret"], "code": pyotp.TOTP(enroll["secret"]).now(), "current_password": "wrong"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 401
+    assert _totp_enabled(admin_client) is False
+
+
+def test_totp_confirm_rejects_a_malformed_secret(admin_client: TestClient) -> None:
+    response = admin_client.post(
+        "/api/admins/me/totp/confirm",
+        json={"secret": "!!", "code": "123456", "current_password": ADMIN_PASSWORD},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+
+
+def test_a_totp_code_cannot_be_used_for_two_logins(admin_client: TestClient) -> None:
+    secret = _enable_totp(admin_client)
+    code = pyotp.TOTP(secret).at(int(time.time()) + 30)  # unspent: enrolment used the current step
+    first = TestClient(app).post(
+        "/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "totp_code": code}
+    )
+    assert first.status_code == 200
+    replay = TestClient(app).post(
+        "/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "totp_code": code}
+    )
+    assert replay.status_code == 401
+
+
+def test_wrong_current_passwords_are_rate_limited(admin_client: TestClient) -> None:
+    """change-password used to be an unthrottled password-guessing oracle
+    for anyone holding a session."""
+    codes = [
+        admin_client.post(
+            "/api/admins/me/change-password",
+            json={"current_password": "wrong", "new_password": "New-Sup3rSecret!"},
+            headers=csrf_headers(admin_client),
+        ).status_code
+        for _ in range(6)
+    ]
+    assert codes[:5] == [401] * 5
+    assert codes[5] == 429
+
+
+def test_new_admin_passwords_need_twelve_characters(admin_client: TestClient) -> None:
+    short = "Short-1!"
+    change = admin_client.post(
+        "/api/admins/me/change-password",
+        json={"current_password": ADMIN_PASSWORD, "new_password": short},
+        headers=csrf_headers(admin_client),
+    )
+    assert change.status_code == 422
+    create = admin_client.post(
+        "/api/admins", json={"email": "new@example.com", "password": short}, headers=csrf_headers(admin_client)
+    )
+    assert create.status_code == 422

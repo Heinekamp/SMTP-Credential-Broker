@@ -136,10 +136,14 @@ def test_totp_enroll_and_remove_are_audited(admin_client: TestClient, db_session
     code = pyotp.TOTP(enroll["secret"]).now()
     admin_client.post(
         "/api/admins/me/totp/confirm",
-        json={"secret": enroll["secret"], "code": code},
+        json={"secret": enroll["secret"], "code": code, "current_password": ADMIN_PASSWORD},
         headers=csrf_headers(admin_client),
     )
-    admin_client.post("/api/admins/me/totp/remove", headers=csrf_headers(admin_client))
+    admin_client.post(
+        "/api/admins/me/totp/remove",
+        json={"current_password": ADMIN_PASSWORD},
+        headers=csrf_headers(admin_client),
+    )
 
     actions = _actions(db_session)
     assert "admin.totp_enroll" in actions
