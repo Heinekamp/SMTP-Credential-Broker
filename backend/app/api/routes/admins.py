@@ -7,8 +7,10 @@ from app.api.deps import get_current_admin, get_db, require_csrf
 from app.api.routes.auth import SESSION_COOKIE_NAME
 from app.core.audit import client_ip, record_audit
 from app.core.encryption import EncryptionKeyNotConfigured, encrypt_secret
+from app.core.rate_limit import check_rate_limit, login_lock, record_login_attempt
 from app.core.security import hash_password, verify_password
 from app.core.sessions import revoke_all_sessions_for_admin
+from app.core.totp import verify_totp
 from app.models.admin import AdminUser
 from app.schemas.admin import (
     AdminCreate,
@@ -17,6 +19,7 @@ from app.schemas.admin import (
     ChangePasswordRequest,
     TotpConfirmRequest,
     TotpEnrollResponse,
+    TotpRemoveRequest,
 )
 
 router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_current_admin)])
@@ -24,6 +27,28 @@ router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_
 # The name shown alongside the account in the admin's authenticator app —
 # matches the product name the frontend's title bar shows (Titlebar.tsx).
 _TOTP_ISSUER = "SMTP Credential Broker"
+
+
+def _require_current_password(db: Session, admin: AdminUser, password: str, request: Request) -> None:
+    """Re-authentication for account-security changes (#169). Goes through
+    the same rate limiter as login, and a wrong password counts as a
+    failed login on this account — otherwise a stolen session would be an
+    unthrottled password-guessing oracle."""
+    ip_address = client_ip(request)
+    with login_lock:
+        status_check = check_rate_limit(db, admin_user_id=admin.id, ip_address=ip_address)
+        if status_check.locked:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "message": "Too many attempts. Try again later.",
+                    "retry_after_seconds": status_check.retry_after_seconds,
+                },
+            )
+        if not verify_password(admin.password_hash, password):
+            record_login_attempt(db, email=admin.email, admin_user_id=admin.id, ip_address=ip_address, success=False)
+            db.commit()
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect")
 
 
 def _to_read(admin: AdminUser) -> AdminRead:
@@ -118,8 +143,7 @@ def change_own_password(
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
-    if not verify_password(admin.password_hash, payload.current_password):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect")
+    _require_current_password(db, admin, payload.current_password, request)
     admin.password_hash = hash_password(payload.new_password)
     # A session cookie stolen before this change must not keep working
     # after it — except the one making this very request, so the admin
@@ -155,12 +179,16 @@ def confirm_totp(
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
-    if not pyotp.TOTP(payload.secret).verify(payload.code, valid_window=1):
+    _require_current_password(db, admin, payload.current_password, request)
+    step = verify_totp(payload.secret, payload.code, last_used_step=None)
+    if step is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication code")
     try:
         admin.totp_secret_encrypted = encrypt_secret(payload.secret)
     except EncryptionKeyNotConfigured as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    # The enrolment code itself mustn't then also work for a login.
+    admin.totp_last_used_step = step
     revoke_all_sessions_for_admin(db, admin.id, except_token=request.cookies.get(SESSION_COOKIE_NAME))
     record_audit(
         db,
@@ -175,11 +203,14 @@ def confirm_totp(
 
 @router.post("/me/totp/remove", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
 def remove_totp(
+    payload: TotpRemoveRequest,
     request: Request,
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> None:
+    _require_current_password(db, admin, payload.current_password, request)
     admin.totp_secret_encrypted = None
+    admin.totp_last_used_step = None
     revoke_all_sessions_for_admin(db, admin.id, except_token=request.cookies.get(SESSION_COOKIE_NAME))
     record_audit(
         db,

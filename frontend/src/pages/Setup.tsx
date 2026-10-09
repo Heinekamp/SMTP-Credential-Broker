@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
+import { MIN_ADMIN_PASSWORD_LENGTH } from "../lib/api/admins";
 import { submitSetup } from "../lib/api/setup";
 import { SESSION_QUERY_KEY } from "../lib/useSession";
 
@@ -26,6 +27,10 @@ export function Setup() {
     setError(null);
     if (password !== confirmPassword) {
       setError("Password and confirmation don't match.");
+      return;
+    }
+    if (password.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     setSubmitting(true);
@@ -80,7 +85,7 @@ export function Setup() {
           />
           <TextInput
             type="password"
-            placeholder="Password"
+            placeholder={`Password (at least ${MIN_ADMIN_PASSWORD_LENGTH} characters)`}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}

@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+
+from app.schemas.admin import MIN_ADMIN_PASSWORD_LENGTH
 
 
 class LoginRequest(BaseModel):
@@ -27,4 +29,4 @@ class SetupRequiredResponse(BaseModel):
 
 class SetupRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=MIN_ADMIN_PASSWORD_LENGTH)

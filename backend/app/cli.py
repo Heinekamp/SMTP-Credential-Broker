@@ -22,8 +22,16 @@ from app.core.test_connection import test_upstream_connection
 from app.db.session import SessionLocal
 from app.models.admin import AdminUser
 from app.models.upstream import UpstreamAccount
+from app.schemas.admin import MIN_ADMIN_PASSWORD_LENGTH
 
 cli = typer.Typer(help="SMTP Credential Broker administrative CLI.")
+
+
+def _check_password_length(password: str) -> None:
+    """Same minimum the API enforces for new admin passwords (#169)."""
+    if len(password) < MIN_ADMIN_PASSWORD_LENGTH:
+        typer.echo(f"Password must be at least {MIN_ADMIN_PASSWORD_LENGTH} characters.", err=True)
+        raise typer.Exit(code=1)
 
 
 @cli.command("create-admin")
@@ -37,6 +45,7 @@ def create_admin(
     way to create an admin account and manually exercise Login in this
     slice.
     """
+    _check_password_length(password)
     db = SessionLocal()
     try:
         if db.query(AdminUser).filter(AdminUser.email == email).one_or_none() is not None:
@@ -63,6 +72,7 @@ def reset_admin_password(
     active sessions, same as a self-service password change (a stolen
     session is exactly the kind of thing a forgotten-password recovery
     should not leave usable)."""
+    _check_password_length(password)
     db = SessionLocal()
     try:
         admin = db.query(AdminUser).filter(AdminUser.email == email).one_or_none()

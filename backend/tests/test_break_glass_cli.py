@@ -149,3 +149,16 @@ def test_disable_totp_unknown_email_fails_cleanly(tmp_path) -> None:
     result = runner.invoke(cli, ["disable-totp", "nobody@example.com"])
     assert result.exit_code == 1
     assert "no admin" in result.output.lower()
+
+
+def test_reset_admin_password_refuses_a_short_password() -> None:
+    """Regression test for #169: the CLI enforces the same 12-character
+    minimum as the API for new admin passwords."""
+    admin_id = _create_admin()
+    result = runner.invoke(cli, ["reset-admin-password", "locked-out@example.com"], input="short\nshort\n")
+    assert result.exit_code == 1
+    assert "at least 12 characters" in result.output
+
+    db = SessionLocal()
+    assert verify_password(db.get(AdminUser, admin_id).password_hash, "old-password") is True
+    db.close()

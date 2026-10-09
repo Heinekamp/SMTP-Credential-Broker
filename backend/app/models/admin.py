@@ -16,6 +16,10 @@ class AdminUser(Base):
     # Encrypted the same way upstream passwords are (security-model.md §5) —
     # a TOTP secret is as sensitive as a password. Null = TOTP disabled.
     totp_secret_encrypted: Mapped[bytes | None] = mapped_column(nullable=True)
+    # The 30-second TOTP time step of the last code accepted for this admin
+    # — a code for that step or earlier is refused, so an observed code
+    # can't be replayed (core/totp.py, #169). Null = none accepted yet.
+    totp_last_used_step: Mapped[int | None] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
         default=utcnow, nullable=False

@@ -1,8 +1,7 @@
 import { type FormEvent, useState } from "react";
 
 import { Button, Card, TextInput } from "../design-system/components";
-import { ApiError } from "../lib/apiClient";
-import { changeOwnPassword } from "../lib/api/admins";
+import { accountErrorMessage, changeOwnPassword, MIN_ADMIN_PASSWORD_LENGTH } from "../lib/api/admins";
 
 export interface ChangePasswordModalProps {
   onDone: () => void;
@@ -27,12 +26,16 @@ export function ChangePasswordModal({ onDone, onCancel }: ChangePasswordModalPro
       setError("New password and confirmation don't match.");
       return;
     }
+    if (newPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      setError(`New password must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
     setSubmitting(true);
     try {
       await changeOwnPassword(currentPassword, newPassword);
       onDone();
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? "Current password is incorrect." : "Could not change password.");
+      setError(accountErrorMessage(err, "Could not change password."));
     } finally {
       setSubmitting(false);
     }
@@ -70,7 +73,7 @@ export function ChangePasswordModal({ onDone, onCancel }: ChangePasswordModalPro
           />
           <TextInput
             type="password"
-            placeholder="New password"
+            placeholder={`New password (at least ${MIN_ADMIN_PASSWORD_LENGTH} characters)`}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
