@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -30,6 +30,36 @@ export function Titlebar() {
   const { theme, setTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const menuId = useId();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  // The account menu used to stay open until its button was clicked again
+  // (#211): close it on Escape (focus back on the button) or a click outside.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
+    }
+    function onPointerDown(e: PointerEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [menuOpen]);
+
+  // The menu item that opened the modal is gone by now, so ModalFrame can't
+  // hand focus back to it — return it to the account button instead.
+  function closeChangePassword() {
+    setChangingPassword(false);
+    menuButtonRef.current?.focus();
+  }
 
   async function handleLogout() {
     try {
@@ -80,9 +110,13 @@ export function Titlebar() {
 
         <NotificationBell />
 
-        <div style={{ position: "relative" }}>
+        <div ref={menuRef} style={{ position: "relative" }}>
           <button
+            ref={menuButtonRef}
             type="button"
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? menuId : undefined}
+            aria-label={session?.email ? `Account menu: ${session.email}` : "Account menu"}
             onClick={() => setMenuOpen((open) => !open)}
             style={{
               display: "flex",
@@ -105,6 +139,7 @@ export function Titlebar() {
 
           {menuOpen && (
             <div
+              id={menuId}
               style={{
                 position: "absolute",
                 right: 0,
@@ -129,11 +164,12 @@ export function Titlebar() {
                 >
                   Appearance
                 </div>
-                <div style={{ display: "flex", gap: 4 }}>
+                <div role="group" aria-label="Appearance" style={{ display: "flex", gap: 4 }}>
                   {THEME_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
                       type="button"
+                      aria-pressed={theme === opt.value}
                       onClick={() => setTheme(opt.value)}
                       style={{
                         flex: 1,
@@ -171,7 +207,7 @@ export function Titlebar() {
       </div>
 
       {changingPassword && (
-        <ChangePasswordModal onDone={() => setChangingPassword(false)} onCancel={() => setChangingPassword(false)} />
+        <ChangePasswordModal onDone={closeChangePassword} onCancel={closeChangePassword} />
       )}
     </header>
   );

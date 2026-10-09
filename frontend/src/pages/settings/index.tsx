@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Tabs } from "../../design-system/components";
+import { TabPanel, Tabs } from "../../design-system/components";
 import { AdminsTab } from "./AdminsTab";
 import { AppearanceTab } from "./AppearanceTab";
 import { NotificationsTab } from "./NotificationsTab";
@@ -27,13 +27,17 @@ export function Settings() {
           ]}
           active={tab}
           onChange={(value) => setTab(value as SettingsTab)}
+          idPrefix="settings"
+          ariaLabel="Settings sections"
         />
       </div>
-      {tab === "admins" && <AdminsTab />}
-      {tab === "system" && <SystemTab />}
-      {tab === "notifications" && <NotificationsTab />}
-      {tab === "tls" && <TlsCertificateTab />}
-      {tab === "appearance" && <AppearanceTab />}
+      <TabPanel idPrefix="settings" value={tab}>
+        {tab === "admins" && <AdminsTab />}
+        {tab === "system" && <SystemTab />}
+        {tab === "notifications" && <NotificationsTab />}
+        {tab === "tls" && <TlsCertificateTab />}
+        {tab === "appearance" && <AppearanceTab />}
+      </TabPanel>
     </div>
   );
 }

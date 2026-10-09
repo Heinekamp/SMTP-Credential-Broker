@@ -132,7 +132,7 @@ export function NotificationsTab() {
           enabled upstream account.
         </p>
         <div style={fieldLabelStyle}>Interval</div>
-        <Select value={interval} onChange={(e) => setInterval(e.target.value)} style={{ width: "100%" }}>
+        <Select aria-label="Interval" value={interval} onChange={(e) => setInterval(e.target.value)} style={{ width: "100%" }}>
           {withStoredValue(INTERVAL_OPTIONS, interval, `Every ${interval} minutes`).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
@@ -148,7 +148,7 @@ export function NotificationsTab() {
         </p>
         <div style={rowStyle}>
           <span style={{ fontSize: "var(--text-sm)" }}>Enable update checking</span>
-          <Switch checked={updateCheckEnabled} onChange={setUpdateCheckEnabled} />
+          <Switch ariaLabel="Enable update checking" checked={updateCheckEnabled} onChange={setUpdateCheckEnabled} />
         </div>
       </Card>
 
@@ -160,7 +160,7 @@ export function NotificationsTab() {
         </p>
 
         <div style={fieldLabelStyle}>Recipients (comma-separated)</div>
-        <TextInput
+        <TextInput aria-label="Recipients (comma-separated)"
           value={recipients}
           onChange={(e) => setRecipients(e.target.value)}
           placeholder="admin@example.com, oncall@example.com"
@@ -168,7 +168,7 @@ export function NotificationsTab() {
         />
 
         <div style={fieldLabelStyle}>Send from</div>
-        <Select value={senderId} onChange={(e) => setSenderId(e.target.value)} style={{ width: "100%", marginBottom: 12 }}>
+        <Select aria-label="Send from" value={senderId} onChange={(e) => setSenderId(e.target.value)} style={{ width: "100%", marginBottom: 12 }}>
           <option value="">— No sender configured —</option>
           {senders?.map((sender) => (
             <option key={sender.id} value={sender.id}>
@@ -178,7 +178,7 @@ export function NotificationsTab() {
         </Select>
 
         <div style={fieldLabelStyle}>From name (optional)</div>
-        <TextInput
+        <TextInput aria-label="From name (optional)"
           value={fromName}
           onChange={(e) => setFromName(e.target.value)}
           placeholder="SMTP Relay Alerts"
@@ -191,23 +191,23 @@ export function NotificationsTab() {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={rowStyle}>
             <span style={{ fontSize: "var(--text-sm)" }}>Relay degraded</span>
-            <Switch checked={notifyHealth} onChange={setNotifyHealth} />
+            <Switch ariaLabel="Relay degraded" checked={notifyHealth} onChange={setNotifyHealth} />
           </div>
           <div style={rowStyle}>
             <span style={{ fontSize: "var(--text-sm)" }}>Upstream account failing its test</span>
-            <Switch checked={notifyUpstream} onChange={setNotifyUpstream} />
+            <Switch ariaLabel="Upstream account failing its test" checked={notifyUpstream} onChange={setNotifyUpstream} />
           </div>
           <div style={rowStyle}>
             <span style={{ fontSize: "var(--text-sm)" }}>SMTP Credential Broker update available</span>
-            <Switch checked={notifyAppUpdate} onChange={setNotifyAppUpdate} />
+            <Switch ariaLabel="SMTP Credential Broker update available" checked={notifyAppUpdate} onChange={setNotifyAppUpdate} />
           </div>
           <div style={rowStyle}>
             <span style={{ fontSize: "var(--text-sm)" }}>Postfix update available</span>
-            <Switch checked={notifyPostfixUpdate} onChange={setNotifyPostfixUpdate} />
+            <Switch ariaLabel="Postfix update available" checked={notifyPostfixUpdate} onChange={setNotifyPostfixUpdate} />
           </div>
           <div style={rowStyle}>
             <span style={{ fontSize: "var(--text-sm)" }}>Local user throttled continuously (rate-limit abuse)</span>
-            <Switch checked={notifyRateLimitAbuse} onChange={setNotifyRateLimitAbuse} />
+            <Switch ariaLabel="Local user throttled continuously (rate-limit abuse)" checked={notifyRateLimitAbuse} onChange={setNotifyRateLimitAbuse} />
           </div>
         </div>
 
@@ -250,7 +250,7 @@ export function NotificationsTab() {
         </p>
 
         <div style={fieldLabelStyle}>Threshold (minutes)</div>
-        <TextInput
+        <TextInput aria-label="Threshold (minutes)"
           type="number"
           min={1}
           value={abuseThresholdMinutes}
@@ -260,7 +260,7 @@ export function NotificationsTab() {
 
         <div style={rowStyle}>
           <span style={{ fontSize: "var(--text-sm)" }}>Automatically disable the credential</span>
-          <Switch checked={autoDisableEnabled} onChange={setAutoDisableEnabled} />
+          <Switch ariaLabel="Automatically disable the credential" checked={autoDisableEnabled} onChange={setAutoDisableEnabled} />
         </div>
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: 8, marginBottom: 0 }}>
           Stops <em>all</em> of that credential's mail, not just the excess — a real availability cost if you're

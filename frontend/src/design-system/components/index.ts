@@ -12,7 +12,7 @@ export { Select } from "./Select";
 export type { SelectProps } from "./Select";
 export { Switch } from "./Switch";
 export type { SwitchProps } from "./Switch";
-export { Tabs } from "./Tabs";
+export { TabPanel, Tabs } from "./Tabs";
 export type { TabsProps } from "./Tabs";
 export { StatTile } from "./StatTile";
 export type { StatTileProps } from "./StatTile";

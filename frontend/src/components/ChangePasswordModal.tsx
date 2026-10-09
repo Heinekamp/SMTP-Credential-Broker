@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 
-import { Button, Card, TextInput } from "../design-system/components";
+import { Button, TextInput } from "../design-system/components";
+import { ModalFrame } from "./ModalFrame";
 import { accountErrorMessage, changeOwnPassword, MIN_ADMIN_PASSWORD_LENGTH } from "../lib/api/admins";
 
 export interface ChangePasswordModalProps {
@@ -42,63 +43,50 @@ export function ChangePasswordModal({ onDone, onCancel }: ChangePasswordModalPro
   }
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
-    >
-      <Card style={{ width: "100%", maxWidth: 440, padding: 24 }}>
-        <h2 style={{ margin: "0 0 16px", fontSize: "var(--text-md)", fontWeight: 600 }}>Change Password</h2>
-        <form onSubmit={submit}>
-          {error && (
-            <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 14 }}>
-              {error}
-            </div>
-          )}
-          <TextInput
-            type="password"
-            placeholder="Current password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            autoFocus
-            style={{ width: "100%", marginBottom: 14 }}
-            aria-label="Current password"
-          />
-          <TextInput
-            type="password"
-            placeholder={`New password (at least ${MIN_ADMIN_PASSWORD_LENGTH} characters)`}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            autoComplete="new-password"
-            style={{ width: "100%", marginBottom: 14 }}
-            aria-label="New password"
-          />
-          <TextInput
-            type="password"
-            placeholder="Confirm new password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            autoComplete="new-password"
-            style={{ width: "100%", marginBottom: 20 }}
-            aria-label="Confirm new password"
-          />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Button type="button" variant="default" onClick={onCancel} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="accent" disabled={submitting}>
-              Save
-            </Button>
+    <ModalFrame title="Change Password" onClose={onCancel} maxWidth={440}>
+      <form onSubmit={submit}>
+        {error && (
+          <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 14 }}>
+            {error}
           </div>
-        </form>
-      </Card>
-    </div>
+        )}
+        <TextInput
+          type="password"
+          placeholder="Current password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          autoComplete="current-password"
+          autoFocus
+          style={{ width: "100%", marginBottom: 14 }}
+          aria-label="Current password"
+        />
+        <TextInput
+          type="password"
+          placeholder={`New password (at least ${MIN_ADMIN_PASSWORD_LENGTH} characters)`}
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          autoComplete="new-password"
+          style={{ width: "100%", marginBottom: 14 }}
+          aria-label="New password"
+        />
+        <TextInput
+          type="password"
+          placeholder="Confirm new password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          autoComplete="new-password"
+          style={{ width: "100%", marginBottom: 20 }}
+          aria-label="Confirm new password"
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button type="button" variant="default" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="accent" disabled={submitting}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }

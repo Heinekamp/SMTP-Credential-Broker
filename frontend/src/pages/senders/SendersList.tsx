@@ -153,6 +153,7 @@ export function SendersList() {
                   </td>
                   <td style={tdStyle}>
                     <Switch
+                      ariaLabel={`Enabled: ${sender.address}`}
                       checked={sender.enabled}
                       onChange={(checked) => {
                         if (checked) {
