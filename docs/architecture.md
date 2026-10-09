@@ -197,7 +197,7 @@ queue implementation.
 ## 7. Health checks
 
 Per spec §28, the health endpoint must reflect actual capability, not just
-process liveness. `GET /api/health` (`app/core/health.py`) runs four checks:
+process liveness. `GET /api/health` (`app/core/health.py`) runs four checks (anonymous callers get only `status` and the per-check booleans, refreshed at most every 5 seconds; the `detail` text is for logged-in admins, #175):
 
 - **Database reachable** — a real `SELECT 1`, not just "process is up."
 - **Postfix reachable and running** — via a `status` op on the control

@@ -86,3 +86,12 @@ def test_export_senders_csv_reflects_permission_count(admin_client: TestClient, 
 
     rows = _rows(admin_client.get("/api/exports/senders.csv"))
     assert rows[1] == [sender.address, "STRATO", "yes", "1", ""]
+
+
+def test_csv_cells_that_look_like_formulas_are_neutralized() -> None:
+    """Regression test for #175: an admin-set name like `=HYPERLINK(...)`
+    would run as a formula when the export is opened in a spreadsheet."""
+    from app.core.csv_export import csv_response
+
+    body = csv_response("x.csv", ["name"], [["=1+1"], ["+cmd"], ["-2"], ["@SUM(A1)"], ["plain"], [3]]).body.decode()
+    assert body.splitlines() == ["name", "'=1+1", "'+cmd", "'-2", "'@SUM(A1)", "plain", "3"]
