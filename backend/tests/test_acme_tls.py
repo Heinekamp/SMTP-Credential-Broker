@@ -518,5 +518,8 @@ def test_finalize_manual_dns_challenge_refuses_after_the_domain_changed(db_sessi
     result = acme_tls.finalize_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
 
     assert result.success is False
-    assert "old.example.com" in result.detail and "new.example.com" in result.detail
+    assert result.detail == (
+        "This DNS-01 challenge was for old.example.com, but the configured domain is now "
+        "new.example.com. Start a new challenge."
+    )
     assert get_tls_pending_manual_challenge(db_session) is None
