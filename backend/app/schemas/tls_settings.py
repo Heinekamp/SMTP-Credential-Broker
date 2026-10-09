@@ -2,6 +2,8 @@ import datetime
 
 from pydantic import BaseModel, EmailStr
 
+from app.schemas.common import PartialUpdate
+
 
 class TlsSettingsRead(BaseModel):
     acme_enabled: bool
@@ -23,7 +25,7 @@ class TlsSettingsRead(BaseModel):
     manual_dns_expires_at: datetime.datetime | None
 
 
-class TlsSettingsUpdate(BaseModel):
+class TlsSettingsUpdate(PartialUpdate):
     """All fields optional — only supplied fields are changed, matching
     UpstreamAccountUpdate's existing partial-update convention.
     `cloudflare_api_token` left unset (not sent) keeps the currently
@@ -37,6 +39,8 @@ class TlsSettingsUpdate(BaseModel):
     dns_provider: str | None = None
     cloudflare_zone_id: str | None = None
     cloudflare_api_token: str | None = None
+
+    NON_NULLABLE = frozenset({"acme_enabled", "dns_provider"})
 
 
 class VerifyDnsAccessResponse(BaseModel):

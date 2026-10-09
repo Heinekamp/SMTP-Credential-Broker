@@ -3,7 +3,7 @@ import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TestResult, TlsMode
-from app.schemas.common import SingleLineName, UpstreamPassword
+from app.schemas.common import PartialUpdate, SingleLineName, UpstreamPassword
 
 # Hostname (RFC 1123 labels) or IPv4 literal — both config_generator.py's
 # sasl_passwd/sender_relayhost map lines and control_surface.py's actual
@@ -33,7 +33,7 @@ class UpstreamAccountCreate(BaseModel):
     tls_skip_verify: bool = False
 
 
-class UpstreamAccountUpdate(BaseModel):
+class UpstreamAccountUpdate(PartialUpdate):
     """All fields optional — only supplied fields are changed. `password`
     omitted or blank means "keep the current password" (the write-only
     field contract from claude-design-prompt.md's Upstream Accounts form:
@@ -49,6 +49,8 @@ class UpstreamAccountUpdate(BaseModel):
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
     tls_skip_verify: bool | None = None
+
+    NON_NULLABLE = frozenset({"name", "host", "port", "tls_mode", "username", "enabled", "tls_skip_verify"})
 
 
 class UpstreamAccountRead(BaseModel):

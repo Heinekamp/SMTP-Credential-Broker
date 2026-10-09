@@ -407,3 +407,10 @@ def test_get_does_not_report_an_expired_pending_challenge(admin_client: TestClie
 
     response = admin_client.get("/api/tls-settings")
     assert response.json()["manual_dns_pending"] is False
+
+
+def test_explicit_null_on_required_tls_settings_is_a_422(admin_client: TestClient) -> None:
+    """Regression test for #189: these reached a NOT NULL column (500)."""
+    for field in ("acme_enabled", "dns_provider"):
+        response = admin_client.patch("/api/tls-settings", json={field: None}, headers=csrf_headers(admin_client))
+        assert response.status_code == 422, field

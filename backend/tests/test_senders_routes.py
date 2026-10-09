@@ -168,3 +168,22 @@ def test_grant_twice_is_not_an_error(admin_client: TestClient, db_session: Sessi
             f"/api/senders/{sender['id']}/permissions/{user.id}", headers=csrf_headers(admin_client)
         )
         assert response.status_code == 204
+
+
+def test_explicit_null_on_a_required_sender_field_is_a_422_not_a_409(admin_client: TestClient) -> None:
+    """Regression test for #189: it used to surface as "A sender with this
+    address already exists"."""
+    upstream_id = _create_upstream(admin_client)
+    sender = admin_client.post(
+        "/api/senders", json={"address": "a@example.com", "upstream_account_id": upstream_id},
+        headers=csrf_headers(admin_client),
+    ).json()
+    for field in ("address", "upstream_account_id", "enabled"):
+        response = admin_client.patch(
+            f"/api/senders/{sender['id']}", json={field: None}, headers=csrf_headers(admin_client)
+        )
+        assert response.status_code == 422, field
+    ok = admin_client.patch(
+        f"/api/senders/{sender['id']}", json={"description": None}, headers=csrf_headers(admin_client)
+    )
+    assert ok.status_code == 200  # nullable by meaning

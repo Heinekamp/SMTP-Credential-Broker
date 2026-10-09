@@ -1,6 +1,26 @@
-from typing import Annotated
+from typing import Annotated, Any, ClassVar
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+
+
+class PartialUpdate(BaseModel):
+    """Base for PATCH schemas, where every field is optional so it can be
+    left out. Leaving a field out means "unchanged"; an explicit `null` is
+    only allowed where null *means* something (unset, keep forever,
+    unlimited, keep the current password). For the fields listed in
+    NON_NULLABLE it used to reach the database as NULL — a 500 from a
+    NOT NULL constraint, or a misleading 409 (#189)."""
+
+    NON_NULLABLE: ClassVar[frozenset[str]] = frozenset()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nulled = sorted(name for name in cls.NON_NULLABLE if name in data and data[name] is None)
+            if nulled:
+                raise ValueError(f"{', '.join(nulled)} cannot be null — omit a field to leave it unchanged")
+        return data
 
 
 def _no_control_characters(value: str) -> str:
