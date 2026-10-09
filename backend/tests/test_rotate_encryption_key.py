@@ -14,13 +14,15 @@ import base64
 import pytest
 from typer.testing import CliRunner
 
-from app.cli import cli
+from app.cli import cli, encrypted_columns
 from app.core.encryption import decrypt_with_key, encrypt_with_key
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.admin import AdminUser
 from app.models.enums import TlsMode
 from app.models.sender import Sender
+from app.models.settings import RelaySettings
+from app.models.tls import TlsCertificateState, TlsPendingManualChallenge
 from app.models.upstream import UpstreamAccount
 
 runner = CliRunner()
@@ -42,6 +44,9 @@ def _clean_shared_db() -> None:
         db.query(Sender).delete()
         db.query(UpstreamAccount).delete()
         db.query(AdminUser).delete()
+        db.query(RelaySettings).delete()
+        db.query(TlsCertificateState).delete()
+        db.query(TlsPendingManualChallenge).delete()
         db.commit()
     finally:
         db.close()
@@ -84,7 +89,7 @@ def test_rotates_upstream_account_passwords(tmp_path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "1 upstream account credential" in result.output
+    assert "upstream_accounts.encrypted_password: 1" in result.output
 
     db = SessionLocal()
     rotated = db.get(UpstreamAccount, account_id)
@@ -115,7 +120,7 @@ def test_rotates_admin_totp_secrets(tmp_path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "1 TOTP secret" in result.output
+    assert "admin_users.totp_secret_encrypted: 1" in result.output
 
     db = SessionLocal()
     rotated = db.get(AdminUser, admin_id)
@@ -224,3 +229,76 @@ def test_malformed_key_file_fails_cleanly(tmp_path) -> None:
         ],
     )
     assert result.exit_code != 0
+
+
+def test_every_encrypted_column_is_known() -> None:
+    """Pins the set rotate-encryption-key discovers (#179). Rotation itself
+    finds encrypted columns from the metadata, so a new one is rotated
+    automatically — this only makes adding one a deliberate, visible change
+    (and a reminder to cover it in the test below)."""
+    assert sorted(f"{t.name}.{c.name}" for t, c in encrypted_columns()) == [
+        "admin_users.totp_secret_encrypted",
+        "relay_settings.tls_cloudflare_api_token_encrypted",
+        "tls_certificate_state.acme_account_key_encrypted",
+        "tls_certificate_state.encrypted_key_pem",
+        "tls_pending_manual_challenge.encrypted_account_key_pem",
+        "tls_pending_manual_challenge.encrypted_cert_key_pem",
+        "upstream_accounts.encrypted_password",
+    ]
+
+
+def test_rotates_the_cloudflare_token_and_tls_keys(tmp_path) -> None:
+    """Regression test for #179: these five were left under the old key, so
+    certificate renewal failed for good after any rotation."""
+    import datetime
+
+    db = SessionLocal()
+    db.add(RelaySettings(id=1, tls_cloudflare_api_token_encrypted=_encrypt_under("cf-token", OLD_KEY)))
+    db.add(
+        TlsCertificateState(
+            id=1,
+            encrypted_key_pem=_encrypt_under("cert-key", OLD_KEY),
+            acme_account_key_encrypted=_encrypt_under("acme-key", OLD_KEY),
+        )
+    )
+    db.add(
+        TlsPendingManualChallenge(
+            id=1,
+            domain="relay.example.com",
+            record_name="_acme-challenge.relay.example.com",
+            record_value="v",
+            order_json="{}",
+            encrypted_cert_key_pem=_encrypt_under("pending-cert-key", OLD_KEY),
+            encrypted_account_key_pem=_encrypt_under("pending-account-key", OLD_KEY),
+            account_uri="https://acme.example/acct/1",
+            directory_url="https://acme.example/directory",
+            expires_at=datetime.datetime(2030, 1, 1),
+        )
+    )
+    db.commit()
+    db.close()
+
+    result = runner.invoke(
+        cli,
+        [
+            "rotate-encryption-key",
+            "--old-key-file",
+            _key_file(tmp_path, "old.key", OLD_KEY),
+            "--new-key-file",
+            _key_file(tmp_path, "new.key", NEW_KEY),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Rotated 5 stored secret(s)" in result.output
+
+    new_key = base64.b64decode(NEW_KEY)
+    db = SessionLocal()
+    settings_row = db.get(RelaySettings, 1)
+    cert_state = db.get(TlsCertificateState, 1)
+    pending = db.get(TlsPendingManualChallenge, 1)
+    assert decrypt_with_key(settings_row.tls_cloudflare_api_token_encrypted, new_key) == "cf-token"
+    assert decrypt_with_key(cert_state.encrypted_key_pem, new_key) == "cert-key"
+    assert decrypt_with_key(cert_state.acme_account_key_encrypted, new_key) == "acme-key"
+    assert decrypt_with_key(pending.encrypted_cert_key_pem, new_key) == "pending-cert-key"
+    assert decrypt_with_key(pending.encrypted_account_key_pem, new_key) == "pending-account-key"
+    db.close()

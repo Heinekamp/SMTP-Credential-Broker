@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 
 import typer
+from sqlalchemy import Column, Table, select, update
 
+import app.models  # noqa: F401 - registers every table on Base.metadata
 from app.core.audit import record_audit
 from app.core.config_generator import generate_and_apply
 from app.core.encryption import (
@@ -19,6 +21,7 @@ from app.core.postfix_control import PostfixControlError, queue_list
 from app.core.security import hash_password
 from app.core.sessions import revoke_all_sessions_for_admin
 from app.core.test_connection import test_upstream_connection
+from app.db.base import Base
 from app.db.session import SessionLocal
 from app.models.admin import AdminUser
 from app.models.upstream import UpstreamAccount
@@ -129,39 +132,54 @@ def rotate_encryption_key(
     old_key_file: Path = typer.Option(..., exists=True, help="Path to the current base64-encoded 32-byte key"),
     new_key_file: Path = typer.Option(..., exists=True, help="Path to the new base64-encoded 32-byte key"),
 ) -> None:
-    """Re-encrypts every stored secret (upstream account passwords, admin
-    TOTP secrets) from the old key to the new one, in a single transaction
-    (security-model.md §2). Nothing is committed until every row has been
-    successfully decrypted with the old key and re-encrypted with the new
-    one — any failure aborts the whole operation and leaves the database
-    exactly as it was; there is no partial-rotation state."""
+    """Re-encrypts every stored secret — every column whose name contains
+    "encrypted" (encrypted_columns()): upstream passwords, admin TOTP
+    secrets, the Cloudflare API token, TLS and ACME keys, pending manual
+    DNS challenge keys — from the old key to the new one, in a single
+    transaction (security-model.md §2). Nothing is committed until every
+    value has been decrypted with the old key and re-encrypted with the new
+    one; any failure aborts the whole operation and leaves the database
+    exactly as it was — there is no partial-rotation state."""
     old_key = parse_key_file(old_key_file)
     new_key = parse_key_file(new_key_file)
 
     db = SessionLocal()
     try:
-        accounts = db.query(UpstreamAccount).all()
-        admins_with_totp = db.query(AdminUser).filter(AdminUser.totp_secret_encrypted.is_not(None)).all()
-
+        rotated: dict[str, int] = {}
         try:
-            for account in accounts:
-                plaintext = decrypt_with_key(account.encrypted_password, old_key)
-                account.encrypted_password = encrypt_with_key(plaintext, new_key)
-            for admin in admins_with_totp:
-                plaintext = decrypt_with_key(admin.totp_secret_encrypted, old_key)
-                admin.totp_secret_encrypted = encrypt_with_key(plaintext, new_key)
+            for table, column in encrypted_columns():
+                pk = list(table.primary_key.columns)
+                rows = db.execute(select(*pk, column).where(column.is_not(None))).all()
+                for row in rows:
+                    plaintext = decrypt_with_key(row[-1], old_key)
+                    match = [pk_column == value for pk_column, value in zip(pk, row[:-1], strict=True)]
+                    db.execute(update(table).where(*match).values({column.name: encrypt_with_key(plaintext, new_key)}))
+                rotated[f"{table.name}.{column.name}"] = len(rows)
         except DecryptionFailed as exc:
             db.rollback()
             typer.echo(f"Rotation aborted, database left unchanged: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
         db.commit()
-        typer.echo(
-            f"Rotated {len(accounts)} upstream account credential(s) and "
-            f"{len(admins_with_totp)} TOTP secret(s)."
-        )
+        typer.echo(f"Rotated {sum(rotated.values())} stored secret(s):")
+        for name, count in rotated.items():
+            typer.echo(f"  {name}: {count}")
     finally:
         db.close()
+
+
+def encrypted_columns() -> list[tuple[Table, Column]]:
+    """Every database column holding a secret encrypted with the app key —
+    by naming convention, any column whose name contains "encrypted"
+    (core/encryption.py). Discovered from the metadata rather than listed by
+    hand: the hand-maintained list missed five of them (#179), leaving the
+    Cloudflare token and TLS/ACME keys under the old key after a rotation."""
+    return [
+        (table, column)
+        for table in Base.metadata.sorted_tables
+        for column in table.columns
+        if "encrypted" in column.name
+    ]
 
 
 @cli.command("test-upstream")

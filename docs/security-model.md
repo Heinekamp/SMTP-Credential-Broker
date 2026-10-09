@@ -35,11 +35,15 @@ around Postfix: the web application, its database, and its secrets.
   ciphertext (standard GCM practice — nonces are never reused with the same
   key).
 - **Key rotation**: rotating `ENCRYPTION_KEY` requires re-encrypting every
-  `upstream_accounts.encrypted_password` row. The CLI provides
+  stored secret: every column whose name contains `encrypted` (upstream
+  passwords, admin TOTP secrets, the Cloudflare API token, the TLS
+  certificate and ACME account keys, and a pending manual DNS-01
+  challenge's keys). The CLI provides
   `relay rotate-encryption-key --old-key-file ... --new-key-file ...`, which
-  decrypts every row with the old key and re-encrypts with the new one inside
-  a single DB transaction, aborting (and leaving the database untouched) if
-  any row fails to decrypt. This is the *only* supported way to rotate the
+  finds those columns from the database metadata, so a newly added one
+  can't be missed (#179). It decrypts every value with the old key and
+  re-encrypts it with the new one inside a single DB transaction, aborting
+  (and leaving the database untouched) if any value fails to decrypt. This is the *only* supported way to rotate the
   key; there is no "partial" state where some rows use the old key and some
   the new one.
 - **Key loss**: if `ENCRYPTION_KEY` is lost with no backup, every upstream
