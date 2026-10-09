@@ -623,11 +623,26 @@ def test_sasl_passwd_map_is_written_owner_only(monkeypatch: pytest.MonkeyPatch, 
     import stat
 
     monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path))
-    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: _completed(0))
+    # An .lmdb left over from an earlier version, world-readable — postmap
+    # updates an existing database in place without touching its mode (#163).
+    (tmp_path / "sasl_passwd.lmdb").write_bytes(b"old")
+    os.chmod(tmp_path / "sasl_passwd.lmdb", 0o644)
+
+    def fake_postmap(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+        db_path = args[1].split(":", 1)[1] + ".lmdb"
+        if not os.path.exists(db_path):
+            with open(db_path, "wb") as f:
+                f.write(b"db")
+            os.chmod(db_path, 0o644)
+        return _completed(0)
+
+    monkeypatch.setattr(control_surface, "_run", fake_postmap)
     control_surface._install_maps({"sasl_passwd": "a@b\tuser:secret\n", "sender_login": "a@b\tuser\n"})
 
     assert stat.S_IMODE(os.stat(tmp_path / "sasl_passwd").st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(tmp_path / "sasl_passwd.lmdb").st_mode) == 0o600
     assert stat.S_IMODE(os.stat(tmp_path / "sender_login").st_mode) == 0o644
+    assert stat.S_IMODE(os.stat(tmp_path / "sender_login.lmdb").st_mode) == 0o644
 
 
 @_posix_only
