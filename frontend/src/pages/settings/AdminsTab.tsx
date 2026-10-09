@@ -6,7 +6,7 @@ import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-sys
 import { ChangePasswordModal } from "../../components/ChangePasswordModal";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { TotpEnrollModal } from "../../components/TotpEnrollModal";
-import { ApiError } from "../../lib/apiClient";
+import { ApiError, errorMessage } from "../../lib/apiClient";
 import {
   accountErrorMessage,
   createAdmin,
@@ -40,6 +40,7 @@ export function AdminsTab() {
   const [removeTotpPassword, setRemoveTotpPassword] = useState("");
   const [deactivateTarget, setDeactivateTarget] = useState<AdminRead | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const setActive = useMutation({
     mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => setAdminActive(id, isActive),
@@ -47,11 +48,13 @@ export function AdminsTab() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setDeactivateTarget(null);
       setDeactivateError(null);
+      setActionError(null);
     },
-    onError: (err) => {
-      setDeactivateError(
-        err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not change this admin's status.",
-      );
+    onError: (err, { isActive }) => {
+      const message = errorMessage(err, "Could not change this admin's status.");
+      // Reactivating has no modal to show this in (#207).
+      if (isActive) setActionError(message);
+      else setDeactivateError(message);
     },
   });
 
@@ -94,6 +97,11 @@ export function AdminsTab() {
           + Add Admin
         </Button>
       </div>
+      {actionError && (
+        <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 12 }}>
+          {actionError}
+        </div>
+      )}
 
       {showAddForm && (
         <Card style={{ maxWidth: 420, marginBottom: 16 }}>

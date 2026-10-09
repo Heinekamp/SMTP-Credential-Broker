@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, StatusBadge, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
-import { ApiError } from "../../lib/apiClient";
+import { ApiError, errorMessage } from "../../lib/apiClient";
 import { parseApiDate } from "../../lib/apiDate";
 import {
   deleteUpstreamAccount,
@@ -45,10 +45,20 @@ export function UpstreamAccountsList() {
   const [deleteTarget, setDeleteTarget] = useState<UpstreamAccount | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [disableError, setDisableError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateUpstreamAccount(id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setActionError(null);
+    },
+    onError: (err, { enabled }) => {
+      const message = errorMessage(err, `Could not ${enabled ? "enable" : "disable"} this account.`);
+      if (enabled) setActionError(message);
+      else setDisableError(message);
+    },
   });
 
   const remove = useMutation({
@@ -72,10 +82,14 @@ export function UpstreamAccountsList() {
   });
 
   async function openDeleteModal(account: UpstreamAccount) {
-    const precheck = await deleteUpstreamAccountPrecheck(account.id);
-    setDeleteTarget(account);
-    setDeletePrecheck(precheck.dependent_sender_addresses);
-    setDeleteError(null);
+    try {
+      const precheck = await deleteUpstreamAccountPrecheck(account.id);
+      setDeleteTarget(account);
+      setDeletePrecheck(precheck.dependent_sender_addresses);
+      setDeleteError(null);
+    } catch (err) {
+      setActionError(errorMessage(err, "Could not check what deleting this account would affect."));
+    }
   }
 
   return (
@@ -86,6 +100,11 @@ export function UpstreamAccountsList() {
           + Add Upstream Account
         </Button>
       </div>
+      {actionError && (
+        <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 12 }}>
+          {actionError}
+        </div>
+      )}
 
       {isLoading && (
         <Card>
@@ -182,7 +201,11 @@ export function UpstreamAccountsList() {
           confirmLabel="Disable"
           variant="danger"
           confirming={toggleEnabled.isPending}
-          onCancel={() => setDisableTarget(null)}
+          error={disableError}
+          onCancel={() => {
+            setDisableTarget(null);
+            setDisableError(null);
+          }}
           onConfirm={() => {
             toggleEnabled.mutate(
               { id: disableTarget.id, enabled: false },

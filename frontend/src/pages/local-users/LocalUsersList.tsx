@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Switch, TextInput } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
-import { ApiError } from "../../lib/apiClient";
+import { errorMessage } from "../../lib/apiClient";
 import { relativeTime } from "../../lib/relativeTime";
 import {
   deleteLocalUser,
@@ -127,10 +127,11 @@ export function LocalUsersList() {
   const [deleteTarget, setDeleteTarget] = useState<LocalUser | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  function errorMessage(err: unknown, fallback: string): string {
-    return err instanceof ApiError && typeof err.detail === "string" ? err.detail : fallback;
-  }
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Bumped on a failed inline rate-limit save, remounting the fields so
+  // they snap back to the saved value instead of showing an unsaved one
+  // as if it had stuck (#207).
+  const [rateLimitRevision, setRateLimitRevision] = useState(0);
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateLocalUser(id, { enabled }),
@@ -142,8 +143,19 @@ export function LocalUsersList() {
         navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
       }
     },
-    onError: (err) => setDisableError(errorMessage(err, "Could not change this user's status.")),
+    onError: (err, { enabled }) => {
+      // Re-enabling has no modal — its error would otherwise only appear
+      // inside the (closed) disable modal (#207).
+      const message = errorMessage(err, "Could not change this user's status.");
+      if (enabled) setActionError(message);
+      else setDisableError(message);
+    },
   });
+
+  function rateLimitFailed(err: unknown) {
+    setActionError(errorMessage(err, "Could not save this rate limit."));
+    setRateLimitRevision((n) => n + 1);
+  }
 
   const updateRateLimit = useMutation({
     mutationFn: ({ id, rate_limit_per_hour }: { id: number; rate_limit_per_hour: number | null }) => {
@@ -154,12 +166,14 @@ export function LocalUsersList() {
       return updateLocalUser(id, input);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onError: rateLimitFailed,
   });
 
   const updateRateLimitBurst = useMutation({
     mutationFn: ({ id, rate_limit_burst }: { id: number; rate_limit_burst: number | null }) =>
       updateLocalUser(id, { rate_limit_burst }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onError: rateLimitFailed,
   });
 
   const regenerate = useMutation({
@@ -184,10 +198,14 @@ export function LocalUsersList() {
   });
 
   async function openDeleteModal(user: LocalUser) {
-    const precheck = await deleteLocalUserPrecheck(user.id);
-    setDeleteTarget(user);
-    setDeletePrecheck(precheck.allowed_sender_addresses);
-    setDeleteError(null);
+    try {
+      const precheck = await deleteLocalUserPrecheck(user.id);
+      setDeleteTarget(user);
+      setDeletePrecheck(precheck.allowed_sender_addresses);
+      setDeleteError(null);
+    } catch (err) {
+      setActionError(errorMessage(err, "Could not check what deleting this user would affect."));
+    }
   }
 
   return (
@@ -203,6 +221,11 @@ export function LocalUsersList() {
           </Button>
         </div>
       </div>
+      {actionError && (
+        <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 12 }}>
+          {actionError}
+        </div>
+      )}
 
       {isLoading && (
         <Card>
@@ -277,6 +300,7 @@ export function LocalUsersList() {
                 </td>
                 <td style={tdStyle}>
                   <RateLimitCell
+                    key={`${user.id}-${rateLimitRevision}`}
                     user={user}
                     savingHourly={updateRateLimit.isPending}
                     savingBurst={updateRateLimitBurst.isPending}

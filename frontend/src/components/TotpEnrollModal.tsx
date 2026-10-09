@@ -26,10 +26,13 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    enrollTotp().then((result) => {
-      setSecret(result.secret);
-      setOtpauthUri(result.otpauth_uri);
-    });
+    enrollTotp()
+      .then((result) => {
+        setSecret(result.secret);
+        setOtpauthUri(result.otpauth_uri);
+      })
+      // Without this, any failure left "Generating secret…" on screen forever (#207).
+      .catch((err) => setError(accountErrorMessage(err, "Could not start TOTP enrollment.")));
   }, []);
 
   async function submit(e: FormEvent) {
@@ -145,7 +148,18 @@ export function TotpEnrollModal({ onDone, onCancel }: TotpEnrollModalProps) {
             </div>
           </form>
         ) : (
-          <p style={{ color: "var(--text-muted)" }}>Generating secret…</p>
+          <>
+            {error ? (
+              <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)" }}>
+                {error}
+              </p>
+            ) : (
+              <p style={{ color: "var(--text-muted)" }}>Generating secret…</p>
+            )}
+            <Button type="button" variant="default" onClick={onCancel}>
+              Close
+            </Button>
+          </>
         )}
       </Card>
     </div>
