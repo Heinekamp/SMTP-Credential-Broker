@@ -52,6 +52,12 @@ from app.models.rate_limit import LocalUserBurstBucket, LocalUserRateLimitCounte
 
 _logger = get_logger("rate_limit_policy")
 
+# A defer streak only continues while deferred messages keep arriving at
+# most this far apart; a longer gap starts a new streak (#183). Ten minutes
+# outlasts a sending MTA's first retry backoff, so a client genuinely
+# hammering through its queue stays in one streak.
+DEFER_STREAK_GAP = datetime.timedelta(minutes=10)
+
 _DUNNO = "action=DUNNO\n\n"
 _HOURLY_DEFER = "action=DEFER rate limit exceeded ({limit}/hour) — try again after the current hour ends\n\n"
 _BURST_DEFER = "action=DEFER sending too fast — try again in a moment\n\n"
@@ -132,8 +138,10 @@ def evaluate(db: Session, attrs: dict[str, str]) -> str:
         # unconditionally, and core/rate_limit_abuse.py's opt-in tick can
         # act on it — this module only ever records the fact, never
         # alerts or disables anything itself.
-        if user.rate_limit_defer_streak_started_at is None:
+        last_defer = user.rate_limit_defer_streak_last_at
+        if user.rate_limit_defer_streak_started_at is None or last_defer is None or now - last_defer > DEFER_STREAK_GAP:
             user.rate_limit_defer_streak_started_at = now
+        user.rate_limit_defer_streak_last_at = now
         db.commit()
         if not hourly_ok:
             return _HOURLY_DEFER.format(limit=user.rate_limit_per_hour)
@@ -144,6 +152,7 @@ def evaluate(db: Session, attrs: dict[str, str]) -> str:
         bucket.tokens = tokens_after - 1.0
         bucket.last_refill_at = now
     user.rate_limit_defer_streak_started_at = None
+    user.rate_limit_defer_streak_last_at = None
     db.commit()
     return _DUNNO
 

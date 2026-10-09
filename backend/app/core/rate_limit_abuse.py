@@ -30,6 +30,7 @@ from app.core.audit import record_audit
 from app.core.clock import utcnow
 from app.core.logging_config import get_logger
 from app.core.postfix_control import PostfixControlError
+from app.core.rate_limit_policy import DEFER_STREAK_GAP
 from app.core.settings_store import get_relay_settings
 from app.db.session import SessionLocal
 from app.models.local_user import LocalSmtpUser
@@ -54,6 +55,9 @@ def run_rate_limit_abuse_detection(db: Session) -> list[LocalSmtpUser]:
             LocalSmtpUser.enabled.is_(True),
             LocalSmtpUser.rate_limit_defer_streak_started_at.is_not(None),
             LocalSmtpUser.rate_limit_defer_streak_started_at <= cutoff,
+            # Still being deferred right now — not one rejection followed by
+            # silence, which used to look identical (#183).
+            LocalSmtpUser.rate_limit_defer_streak_last_at >= utcnow() - DEFER_STREAK_GAP,
         )
         .all()
     )

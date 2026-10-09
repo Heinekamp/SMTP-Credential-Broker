@@ -656,7 +656,13 @@ timestamp, not a counter: "how long has this been continuous" is what
 actually distinguishes a genuinely stuck sender from one that's merely
 busy — a legitimately bursty client still gets occasional permits as the
 token bucket refills, so only something sending faster than the
-sustained rate *the entire time* ever crosses a duration threshold.
+sustained rate *the entire time* ever crosses a duration threshold. A
+streak also has to stay *active*: `rate_limit_defer_streak_last_at`
+records the latest defer, and a defer arriving more than 10 minutes
+(`DEFER_STREAK_GAP`) after the previous one starts a new streak. A single
+deferred message followed by silence therefore never counts as
+"throttled continuously". The alert and auto-disable below both require
+the last defer to be within that gap for an enabled user (#183).
 
 Once that streak exceeds `RelaySettings.rate_limit_abuse_threshold_minutes`
 (default 10), it's surfaced two ways, kept deliberately independent of
