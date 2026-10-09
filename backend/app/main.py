@@ -81,7 +81,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             # Not a periodic tick — a long-lived listener Postfix connects
             # to for every message (core/rate_limit_policy.py). Cancelled
             # and awaited on shutdown the same as the ticks above.
-            asyncio.create_task(run_policy_service(get_settings().policy_service_port)),
+            asyncio.create_task(
+                run_policy_service(
+                    get_settings().policy_service_port,
+                    allowed_host=get_settings().policy_service_allowed_client,
+                )
+            ),
         ]
     yield
     for task in tasks:

@@ -199,6 +199,14 @@ def test_upstream_ca_file_override_is_rendered(db_session: Session, monkeypatch:
     assert "smtp_tls_CAfile = /upstream-ca/bundle.crt" in main_cf
 
 
+def test_rate_limit_policy_service_fails_open_when_unreachable(db_session: Session) -> None:
+    """Regression test for #167: without a default action Postfix waits
+    100s and then tempfails every message whenever `app` is down."""
+    main_cf, _ = _render_config(db_session)
+    assert "smtpd_policy_service_default_action = DUNNO" in main_cf
+    assert "smtpd_policy_service_timeout = 10s" in main_cf
+
+
 def test_generated_config_never_delivers_unrouted_mail_directly(db_session: Session) -> None:
     """Regression test for #151: with `relayhost =` empty, any sender
     without a sender_relayhost entry used to be delivered direct-to-MX.

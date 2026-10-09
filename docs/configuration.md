@@ -56,6 +56,7 @@ this is about SMTP sending volume, covered in full in
 
 | Variable | Default | Notes |
 |---|---|---|
+| `RELAY_POLICY_SERVICE_ALLOWED_CLIENT` | `postfix` | The only host (besides loopback) the rate-limit policy service answers. It's resolved per connection, so container IP changes don't matter. The listener trusts the `sasl_username` it's sent, so nothing else on a shared Docker network may talk to it. Change it only if the Postfix service has a different name in your compose setup. |
 | `RELAY_POLICY_SERVICE_PORT` | `10030` | The internal-only TCP port `app` listens on for Postfix's policy-delegation protocol, enforcing each local user's rate limit. Reached via `inet:app:{port}` over the Compose network — never published to the host, and there's normally no reason to change it. |
 
 The limits themselves — per local user and per upstream account — are

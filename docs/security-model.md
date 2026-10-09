@@ -260,9 +260,14 @@ network-facing surface on the `app` container, so it's called out
 separately here rather than folded into §6.
 
 - **Reachability**: plain TCP, `inet:app:{RELAY_POLICY_SERVICE_PORT}`
-  (configuration.md), reachable only from other containers on the same
-  Compose network — never published to the host, and this project ships
-  no ingress that would expose it to a real network either.
+  (configuration.md), never published to the host. Because the listener
+  believes the `sasl_username` it's told, it **only answers the `postfix`
+  service** (`RELAY_POLICY_SERVICE_ALLOWED_CLIENT`, resolved per
+  connection) and loopback. Any other container that shares a Docker
+  network with `app` (common when `app` joins a reverse proxy's network)
+  is refused, so it can't burn through a user's budget and trigger
+  auto-disable (#167). Requests are capped at 100 attribute lines of
+  2 KB each.
 - **What crosses the wire**: the standard policy-protocol attribute set
   (`sasl_username`, `sender`, `recipient`, etc.) in, a single
   `action=DUNNO`/`action=DEFER ...` line out. No secret ever appears on
@@ -280,7 +285,11 @@ separately here rather than folded into §6.
 - **Failure mode**: an internal error while evaluating a request (a
   bug, a database hiccup) fails **open** — the message is permitted, not
   blocked — because a rate-limiter defect must never become a mail-outage
-  defect. This is the opposite failure direction from every credential
+  defect. The same holds when the listener can't be reached at all
+  (`app` down, restarting or crash-looping): `main.cf` sets
+  `smtpd_policy_service_default_action = DUNNO` with a 10 s timeout.
+  Before #167, Postfix's own default made it wait 100 s and then tempfail
+  every message. This is the opposite failure direction from every credential
   check elsewhere in this document, and is a deliberate choice specific
   to this one listener: rate limiting is an abuse-mitigation feature, not
   an authorization boundary, so availability wins the tradeoff here.
