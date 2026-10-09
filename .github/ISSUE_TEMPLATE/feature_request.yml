@@ -5,10 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For open-ended questions or "is this possible?" ideas that aren't a
-        concrete proposal yet, a
-        [discussion](https://github.com/Heinekamp/SMTP-Credential-Broker/discussions)
-        may be a better fit.
+        For open-ended questions or "is this possible?" ideas that aren't a concrete proposal yet, a [discussion](https://github.com/Heinekamp/SMTP-Credential-Broker/discussions) may be a better fit.
 
   - type: textarea
     id: problem
