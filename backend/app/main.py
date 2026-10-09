@@ -104,6 +104,44 @@ async def request_id_middleware(request: Request, call_next) -> Response:
     response.headers["X-Request-ID"] = request_id
     return response
 
+
+# The SPA's own bundle is served from 'self' with no inline scripts
+# (frontend/index.html), and the only third-party origin it loads from is
+# Google Fonts (typography.css). Inline style attributes are pervasive in
+# the React components, hence style-src 'unsafe-inline'; data: covers the
+# TOTP enrolment QR code and blob: the logo upload preview.
+_CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": _CONTENT_SECURITY_POLICY,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+}
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next) -> Response:
+    """Baseline headers on every response (#155). setdefault, so a route
+    with stricter needs — the branding logo/favicon's sandboxing CSP —
+    keeps its own value."""
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(upstream_accounts.router, prefix="/api")
