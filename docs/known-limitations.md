@@ -35,9 +35,21 @@ cumulative failures, the lockout window never grows past 15 minutes; it
 doesn't escalate further, and there's no eventual hard lockout, alerting, or
 CAPTCHA-style backoff growth.
 
-This still throttles a TOTP brute force to roughly 4 attempts/hour
-indefinitely, against a 6-digit code with `valid_window=1` (~333k valid
-values) — slow enough to be low risk today, not urgent to change.
+This still throttles a TOTP brute force to roughly 4 attempts/hour per
+source IP indefinitely, against a 6-digit code with `valid_window=1` (~333k
+valid values) — slow enough to be low risk today, not urgent to change.
+Attempts are evaluated strictly one at a time (#157), so parallel requests
+can't multiply that rate. Guessing spread across many source IPs is capped
+separately by an account-wide counter with 4× higher thresholds
+(`(20, 60s)`, `(40, 300s)`, `(60, 900s)`).
+
+The counters are keyed on the client IP uvicorn sees. **Behind a reverse
+proxy, every client appears as the proxy's IP** unless uvicorn is told to
+trust the proxy's `X-Forwarded-For`: set `FORWARDED_ALLOW_IPS` to the
+proxy's address in the `app` container's environment (for example via
+`docker-compose.override.yml`). Without that, an attacker's failures from
+outside count against the same (account, IP) pair as the real admin's
+logins through the same proxy.
 
 **Revisit when:** exposing the admin login to an untrusted network directly
 (vs. behind a VPN/reverse-proxy-with-its-own-auth, the assumed common case),

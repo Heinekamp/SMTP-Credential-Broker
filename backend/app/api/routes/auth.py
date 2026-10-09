@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.core.clock import utcnow
 from app.core.csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured, decrypt_secret
-from app.core.rate_limit import check_rate_limit, record_login_attempt
+from app.core.rate_limit import check_rate_limit, login_lock, record_login_attempt
 from app.core.security import hash_password, verify_password
 from app.core.sessions import create_session, revoke_session
 from app.models.admin import AdminUser
@@ -61,6 +61,14 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ) -> LoginResponse:
+    # One attempt at a time from rate-limit check through recording the
+    # outcome, so concurrent requests can't all pass the check before any
+    # of their failures is counted (#157).
+    with login_lock:
+        return _login(payload, request, response, db)
+
+
+def _login(payload: LoginRequest, request: Request, response: Response, db: Session) -> LoginResponse:
     ip_address = _client_ip(request)
     admin = db.query(AdminUser).filter(AdminUser.email == payload.email).one_or_none()
     admin_id = admin.id if admin else None
