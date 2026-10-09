@@ -29,9 +29,22 @@ services:
       # docker-compose.override.yml the way other host-specific settings
       # are — it has to be a variable in the base file itself.
       - "${APP_HOST_PORT:-8000}:8000"
+    # Every RELAY_* setting in .env reaches the app (configuration.md).
+    # Without this only the variables named under `environment:` did, so
+    # e.g. the session TTL and login-lockout settings silently did nothing
+    # (#212). Optional — a missing .env is fine — and anything set under
+    # `environment:` below wins over it. Needs Compose 2.24+.
+    env_file:
+      - path: .env
+        required: false
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
-      RELAY_COOKIE_SECURE: "true"
+      # Secure (HTTPS-only) session cookies unless .env says otherwise. A
+      # browser won't keep them on a plain-HTTP page other than localhost,
+      # so an install reached as http://<host>:8000 sets this to false
+      # (installation.md) — it used to be hard-coded "true", which made
+      # such an install impossible to log in to (#212).
+      RELAY_COOKIE_SECURE: ${RELAY_COOKIE_SECURE:-true}
       RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
       RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
       RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE: ${RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE:-60}

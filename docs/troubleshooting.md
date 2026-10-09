@@ -86,6 +86,18 @@ as old, or a key from before a previous rotation.
 
 ## Web UI / login
 
+### Login (or first-run setup) succeeds but you're never logged in
+
+The login screen says your browser didn't keep the session cookie. Older
+builds just showed the login form again. The app sends `Secure`
+(HTTPS-only) cookies by default, and a browser discards those on a
+plain-HTTP page other than `localhost`. Either put the console behind an
+HTTPS reverse proxy, or, on a trusted LAN, set `RELAY_COOKIE_SECURE=false`
+in `.env` and run `docker compose up -d` (configuration.md). Before 0.3.5,
+`docker-compose.yml` hard-coded this to `true`, so setting it in `.env`
+had no effect. Put it in a `docker-compose.override.yml` under
+`services.app.environment` instead.
+
 ### Logging back in after logging out sometimes shows the login form still, despite a valid session
 
 A real bug found and fixed during Stage 8 testing: React Query's

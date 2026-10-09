@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
 import { ApiError, errorMessage, login, type RateLimitDetail } from "../lib/apiClient";
-import { SESSION_QUERY_KEY } from "../lib/useSession";
+import { confirmSessionEstablished, sessionCookieRejectedMessage } from "../lib/useSession";
 
 type LoginStage = "normal" | "totp" | "rate-limited";
 
@@ -36,7 +36,7 @@ export function Login() {
         setStage("totp");
         return;
       }
-      // refetchQueries, not invalidateQueries: no route observes the
+      // Fetched, not just invalidated: no route observes the
       // session query yet (we're still on /login), so invalidateQueries
       // would only mark the old cached value stale without replacing it
       // — RequireSession would then mount on "/" a moment later, read
@@ -44,7 +44,10 @@ export function Login() {
       // back to /login before the background refetch caught up. Real bug,
       // found via a real logout-then-log-back-in-with-TOTP run: the cache
       // must actually be correct *before* navigating, not just marked dirty.
-      await queryClient.refetchQueries({ queryKey: SESSION_QUERY_KEY });
+      if (!(await confirmSessionEstablished(queryClient))) {
+        setError(sessionCookieRejectedMessage());
+        return;
+      }
       navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
