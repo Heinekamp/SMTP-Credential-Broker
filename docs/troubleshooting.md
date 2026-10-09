@@ -40,12 +40,16 @@ reporting as a bug in this project rather than working around.
 
 ### SASL authentication fails for every local user, even correct ones
 
-Most often a Cyrus SASL `auxprop`/socket permission issue rather than a
-credential issue — a symptom is *every* local user failing, not just one.
-Check that the `postfix` container's `saslauthd`/`sasldb2` file
-permissions weren't altered by a bind-mount override, and that the SASL
-group the Postfix `smtpd` process runs under still has read access to
-`sasldb2` after any custom volume changes.
+If you just changed `RELAY_SUBMISSION_HOST`, see the entry below.
+Otherwise it's most often a permissions problem rather than a credential
+one — a symptom is *every* local user failing, not just one. `smtpd` reads
+`/etc/sasldb2` directly through Cyrus SASL's `sasldb` auxprop plugin (no
+`saslauthd` is involved), as the `postfix` user, which is in the `sasl`
+group. The file must stay `root:sasl`, mode `0660`; the entrypoint sets
+that on every start, so a bind mount or custom volume over it is the
+usual culprit. `docker compose exec postfix ls -l /etc/sasldb2` and
+`docker compose exec postfix sasldblistusers2` show the file and the
+users in it.
 
 ### Every local user fails SMTP AUTH after changing `RELAY_SUBMISSION_HOST`
 

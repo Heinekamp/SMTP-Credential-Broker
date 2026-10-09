@@ -53,7 +53,8 @@ right level of friction.
 | Variable | Default | Notes |
 |---|---|---|
 | `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `control_socket` volume already wires this up correctly on both sides — only change this if you've changed that volume's mount point in `app`. |
-| `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection" or config generation). |
+| `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection"). |
+| `RELAY_POSTFIX_CONTROL_APPLY_TIMEOUT` | `75.0` | The same, for applying a generated configuration, which can legitimately take up to about a minute (Postfix is stopped and started, each step allowed 30 s). Raise it only if applies on a slow host are reported as "control surface unreachable" although Settings → System's generation history shows them succeeding. |
 
 ## Sending rate limits
 
@@ -158,9 +159,14 @@ changed without a container restart:
   which alert kinds (relay degraded, an upstream account failing its
   test, an available update) trigger an email.
 
-A new `RELAY_SCHEDULER_ENABLED` (default `true`) setting exists purely so
-the test suite can disable the background scheduler entirely — there's no
-reason to change it in a real deployment.
+`RELAY_SCHEDULER_ENABLED` (default `true`) exists so the test suite can
+switch off everything the app runs in the background. Never turn it off in
+a real deployment: it doesn't only stop the scheduled jobs above (plus
+retention cleanup, certificate renewal and rate-limit abuse detection), it
+also stops the local-user rate-limit policy listener. Postfix then lets
+all mail through unmetered (`smtpd_policy_service_default_action =
+DUNNO`), so per-user rate limits silently stop being enforced. It also
+skips the startup re-sync of the TLS certificate and of `sasldb2`.
 
 ## What's *not* here
 

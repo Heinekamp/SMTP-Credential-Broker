@@ -66,8 +66,9 @@ visible to anything but this relay.
 
 ## Screenshots
 
-Light mode and a custom accent color are both admin-configurable (Settings →
-Appearance) — every screen below still works in light mode too.
+Each admin picks light, dark or system theme for themselves in the account
+menu (top right); the accent color and logo are set for everyone under
+Settings → Appearance. Every screen below works in light mode too.
 
 | Dashboard | Upstream Accounts |
 |---|---|
