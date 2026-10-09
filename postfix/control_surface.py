@@ -224,21 +224,48 @@ def _validate_staged_config(main_cf: str, master_cf: str) -> tuple[bool, str]:
         return valid, detail or "postconf: OK"
 
 
-def _install_maps(maps: dict[str, str]) -> None:
-    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+def _stage_maps(maps: dict[str, str], staging_dir: str, main_cf: str) -> None:
+    """Writes every map source into `staging_dir` and builds its database
+    there, touching nothing live. Raises on the first postmap failure, so
+    a bad map never leaves a mix of new and old maps in place (#191).
+    `postmap -c` reads the staged main.cf instead of the live one — which
+    may not exist yet on a container's very first boot."""
+    _write_file(os.path.join(staging_dir, "main.cf"), main_cf, 0o644)
     for name, content in maps.items():
         # `name` is one of _MAP_NAMES (_require_maps) — never a path.
-        source_path = os.path.join(RELAY_MAP_DIR, name)
+        source_path = os.path.join(staging_dir, name)
         mode = 0o600 if name in _SECRET_MAP_NAMES else 0o644
         _write_file(source_path, content, mode)
-        result = _run(["postmap", f"{MAP_TYPE}:{source_path}"])
+        result = _run(["postmap", "-c", staging_dir, f"{MAP_TYPE}:{source_path}"])
         if result.returncode != 0:
             raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
-        # postmap only copies the source's permissions when it *creates*
-        # the database; an existing one (from an earlier version, on the
-        # persistent relay_config volume) is updated in place and keeps its
-        # old mode — 0644 for sasl_passwd.lmdb on every pre-#159 install (#163).
+        # Explicit, not inherited: postmap only copies the source's mode
+        # when it creates the database (#163).
         os.chmod(f"{source_path}.{MAP_TYPE}", mode)
+
+
+def _activate_staged_maps(maps: dict[str, str], staging_dir: str) -> None:
+    """Moves already-built maps from `staging_dir` into the live map
+    directory — plain renames on the same filesystem. Routing maps go
+    first and sender_login (authorization) last, so a newly granted sender
+    is never authorized before it has a route; and a sender that's
+    authorized but momentarily unrouted bounces (default_transport, #151)
+    rather than leaking."""
+    for name in sorted(maps, key=lambda map_name: map_name == "sender_login"):
+        for suffix in ("", f".{MAP_TYPE}"):
+            os.replace(os.path.join(staging_dir, name + suffix), os.path.join(RELAY_MAP_DIR, name + suffix))
+
+
+def _install_maps(maps: dict[str, str], main_cf: str = "") -> None:
+    """Stages, builds, then activates `maps` — all or nothing for the build
+    step. _apply_config splits the two halves around installing main.cf."""
+    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix=".staging-", dir=RELAY_MAP_DIR)
+    try:
+        _stage_maps(maps, staging_dir, main_cf)
+        _activate_staged_maps(maps, staging_dir)
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def _install_config(main_cf: str, master_cf: str) -> dict[str, str | None]:
@@ -284,16 +311,23 @@ def _apply_config(payload: dict) -> dict:
         # nothing on disk is touched when validation fails.
         return {"ok": True, "success": False, "validation_detail": detail, "reloaded": False}
 
+    # All or nothing (#191): every map is built in a staging directory
+    # first. Only when they all built does anything live change — main.cf
+    # and master.cf, then the maps by rename. A postmap failure used to
+    # leave the new main.cf and some new maps live next to old ones.
+    previous_config: dict[str, str | None] | None = None
+    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix=".staging-", dir=RELAY_MAP_DIR)
     try:
-        # main.cf must exist on disk before `postmap` runs — it does its
-        # own config lookups and fails outright ("open /etc/postfix/main.cf:
-        # No such file or directory") if main.cf isn't there yet, which is
-        # exactly the state on this container's very first boot before any
-        # config has ever been installed.
+        _stage_maps(maps, staging_dir, main_cf)
         previous_config = _install_config(main_cf, master_cf)
-        _install_maps(maps)
+        _activate_staged_maps(maps, staging_dir)
     except (OSError, RuntimeError) as exc:
+        if previous_config is not None:
+            _restore_config(previous_config)
         return {"ok": True, "success": False, "validation_detail": f"install failed: {exc}", "reloaded": False}
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
     reloaded = False
     if reload_if_main_changed:

@@ -649,7 +649,7 @@ def test_sasl_passwd_map_is_written_owner_only(monkeypatch: pytest.MonkeyPatch, 
     os.chmod(tmp_path / "sasl_passwd.lmdb", 0o644)
 
     def fake_postmap(args: list[str], **kwargs) -> subprocess.CompletedProcess:
-        db_path = args[1].split(":", 1)[1] + ".lmdb"
+        db_path = args[-1].split(":", 1)[1] + ".lmdb"
         if not os.path.exists(db_path):
             with open(db_path, "wb") as f:
                 f.write(b"db")
@@ -675,3 +675,99 @@ def test_tls_rollback_restores_the_private_key_owner_only(monkeypatch: pytest.Mo
 
     assert stat.S_IMODE(os.stat(tmp_path / "relay.key").st_mode) == 0o600
     assert stat.S_IMODE(os.stat(tmp_path / "relay.crt").st_mode) == 0o644
+
+
+# ── All-or-nothing config install (#191) ──────────────────────────────
+
+
+def _fake_postmap(fail_on: str | None = None, built: list[str] | None = None):
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        if args[0] == "postmap":
+            assert args[1] == "-c", "postmap must read the staged main.cf, not the live one"
+            source = args[-1].split(":", 1)[1]
+            name = Path(source).name
+            if name == fail_on:
+                return _completed(1, stderr=f"fatal: bad {name}")
+            Path(f"{source}.lmdb").write_text(f"db:{name}", encoding="utf-8")
+            if built is not None:
+                built.append(name)
+            return _completed(0)
+        return _completed(0)
+
+    return fake_run
+
+
+def _setup_live(monkeypatch: pytest.MonkeyPatch, tmp_path) -> tuple[Path, Path]:
+    config_dir = tmp_path / "postfix"
+    map_dir = config_dir / "relay"
+    map_dir.mkdir(parents=True)
+    (config_dir / "main.cf").write_text("old main", encoding="utf-8")
+    (config_dir / "master.cf").write_text("old master", encoding="utf-8")
+    for name in ("sender_login", "sender_relayhost"):
+        (map_dir / name).write_text(f"old {name}", encoding="utf-8")
+        (map_dir / f"{name}.lmdb").write_text(f"old db {name}", encoding="utf-8")
+    monkeypatch.setattr(control_surface, "POSTFIX_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(map_dir))
+    return config_dir, map_dir
+
+
+def test_a_postmap_failure_leaves_the_live_config_and_maps_untouched(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression test for #191: main.cf/master.cf and the maps built before
+    the failing one used to be live already, next to old maps."""
+    config_dir, map_dir = _setup_live(monkeypatch, tmp_path)
+    monkeypatch.setattr(control_surface, "_run", _fake_postmap(fail_on="sender_login"))
+
+    result = control_surface._apply_config(
+        {
+            "main_cf": "new main",
+            "master_cf": "new master",
+            "maps": {"sender_relayhost": "new relayhost", "sasl_passwd": "new sasl", "sender_login": "new login"},
+            "reload_if_main_changed": True,
+        }
+    )
+
+    assert result["success"] is False
+    assert "postmap failed for sender_login" in result["validation_detail"]
+    assert (config_dir / "main.cf").read_text(encoding="utf-8") == "old main"
+    assert (config_dir / "master.cf").read_text(encoding="utf-8") == "old master"
+    assert (map_dir / "sender_relayhost").read_text(encoding="utf-8") == "old sender_relayhost"
+    assert (map_dir / "sender_relayhost.lmdb").read_text(encoding="utf-8") == "old db sender_relayhost"
+    assert not (map_dir / "sasl_passwd").exists()
+    assert [p.name for p in map_dir.iterdir() if p.name.startswith(".staging-")] == []
+
+
+def test_a_successful_apply_activates_every_map_with_sender_login_last(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    config_dir, map_dir = _setup_live(monkeypatch, tmp_path)
+    monkeypatch.setattr(control_surface, "_run", _fake_postmap())
+    activated: list[str] = []
+    real_replace = control_surface.os.replace
+
+    def recording_replace(src, dst):
+        if str(dst).startswith(str(map_dir)) and not str(dst).endswith(".lmdb"):
+            activated.append(Path(dst).name)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(control_surface.os, "replace", recording_replace)
+
+    result = control_surface._apply_config(
+        {
+            "main_cf": "new main",
+            "master_cf": "new master",
+            "maps": {"sender_login": "new login", "sender_relayhost": "new relayhost", "sasl_passwd": "new sasl"},
+            "reload_if_main_changed": False,
+        }
+    )
+
+    assert result["success"] is True
+    assert (config_dir / "main.cf").read_text(encoding="utf-8") == "new main"
+    expected = {"sender_login": "new login", "sender_relayhost": "new relayhost", "sasl_passwd": "new sasl"}
+    for name, content in expected.items():
+        assert (map_dir / name).read_text(encoding="utf-8") == content
+        assert (map_dir / f"{name}.lmdb").read_text(encoding="utf-8") == f"db:{name}"
+    map_activations = [name for name in activated if name in ("sender_login", "sender_relayhost", "sasl_passwd")]
+    assert map_activations[-1] == "sender_login"
+    assert [p.name for p in map_dir.iterdir() if p.name.startswith(".staging-")] == []

@@ -129,13 +129,16 @@ Validate
 Validation PASSES
         │
         ▼
-Atomic install
-   - `postmap` writes each `.db` next to its source, then renames
-     into place (postmap itself is already atomic — see
-     postfix-architecture.md §7)
-   - main.cf/master.cf are written to a temp file in the same
-     directory and rename(2)'d over the live file (atomic on the
-     shared volume's filesystem)
+Atomic install (all or nothing, #191)
+   - every map source is written to a staging directory inside the map
+     directory and built there (`postmap -c <staging>`, so it reads the
+     staged main.cf, not the live one). Any failure stops here, with
+     nothing live touched
+   - only then are main.cf/master.cf written to a temp file and
+     rename(2)'d over the live files
+   - then the staged maps (source + `.lmdb`) are renamed into place:
+     routing maps first, `sender_login` last. A failure at this stage
+     restores the previous main.cf/master.cf
         │
         ▼
 Apply
