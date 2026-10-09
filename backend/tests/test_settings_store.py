@@ -76,3 +76,39 @@ def test_get_tls_certificate_state_is_idempotent(db_session: Session) -> None:
     assert second.id == first.id
     assert second.source == "lets_encrypt"
     assert db_session.query(TlsCertificateState).count() == 1
+
+
+def test_a_racing_first_creation_converges_instead_of_failing(tmp_path) -> None:
+    """Regression test for #193: two background ticks on a fresh database
+    could both see "no row" and both insert, the loser failing with
+    "UNIQUE constraint failed: relay_settings.id"."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.models  # noqa: F401 - registers every table
+    from app.db.base import Base
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    for getter in (get_relay_settings, get_background_job_state, get_tls_certificate_state):
+        with session_factory() as winner:
+            getter(winner)
+            winner.commit()
+
+        with session_factory() as loser:
+            real_get = loser.get
+            calls = {"count": 0}
+
+            def stale_get(model, ident, _real_get=real_get, _calls=calls):
+                # The loser's lookup happened before the winner's commit.
+                _calls["count"] += 1
+                return None if _calls["count"] == 1 else _real_get(model, ident)
+
+            loser.get = stale_get
+            row = getter(loser)
+            loser.commit()
+            assert row.id == 1
+
+    engine.dispose()
