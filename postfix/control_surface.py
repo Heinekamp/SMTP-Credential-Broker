@@ -30,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -635,7 +636,18 @@ def _handle_connection(conn: socket.socket) -> None:
         conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
 
 
+def _shutdown(signum: int, _frame: object) -> None:
+    """`docker stop` / `compose down`: stop Postfix cleanly — finishing
+    in-flight deliveries and flushing the queue state to the volume —
+    instead of being SIGKILLed with it after the grace period (#197)."""
+    print(f"received signal {signum}, stopping postfix", file=sys.stderr, flush=True)
+    _run(["postfix", "stop"])
+    sys.exit(0)
+
+
 def main() -> None:
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
     if os.path.exists(CONTROL_SOCKET_PATH):
         os.remove(CONTROL_SOCKET_PATH)
     os.makedirs(os.path.dirname(CONTROL_SOCKET_PATH), exist_ok=True)
