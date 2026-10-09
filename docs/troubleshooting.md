@@ -47,15 +47,19 @@ permissions weren't altered by a bind-mount override, and that the SASL
 group the Postfix `smtpd` process runs under still has read access to
 `sasldb2` after any custom volume changes.
 
-### A local user's connection settings show the wrong host after changing `RELAY_SUBMISSION_HOST`
+### Every local user fails SMTP AUTH after changing `RELAY_SUBMISSION_HOST`
 
-`inet_interfaces` and the SASL realm are derived from this variable at
-config-generation time — changing it in `.env` and restarting `postfix`
-alone does not retroactively re-issue existing credentials under the new
-realm. Run `relay generate-config` (or trigger "Generate & Apply" from
-Settings) after changing it, and expect existing local users' stored
-credentials to need regeneration too, since `saslpasswd2` ties them to
-the realm at creation time.
+The variable is also the Cyrus SASL realm (postfix-architecture.md §5),
+and each local user's credential is stored under the realm in force when
+it was issued. After a change, Postfix looks every user up under the new
+realm and finds nothing, so all existing local users fail at once.
+Neither restarting `postfix` nor regenerating the config re-issues
+credentials. Make sure both containers picked up the new value
+(`docker compose up -d` recreates them; the app regenerates and applies
+the Postfix config on start), then **Regenerate** each local user's
+password on the Local SMTP Users screen and update the services using
+them. The Connection Details view shows the new host once `app` has been
+recreated.
 
 ## Encryption
 
@@ -176,9 +180,10 @@ sender existing in the system does not by itself authorize any local
 user to send as it; the grant in the Senders screen's permissions view is
 a separate step (security-model.md §4). Also check the sender's
 `enabled` flag and that its upstream account is `enabled` — either being
-off removes it from `smtpd_sender_login_maps` on the next config
-generation, immediately revoking use even if the grant still exists in
-the database.
+off removes it from `smtpd_sender_login_maps` once the configuration is
+next applied, revoking use even if the grant still exists in the
+database. A grant that was *just* added also needs that apply (next
+entry).
 
 ### A newly added sender/permission doesn't seem to take effect
 
