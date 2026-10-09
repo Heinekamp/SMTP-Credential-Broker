@@ -95,7 +95,7 @@ the full walkthrough, or mount a certificate directly.
 | Port | Service | Purpose |
 |---|---|---|
 | 8000 (`APP_HOST_PORT` in `.env` to change) | `app` | Web UI + API (put a reverse proxy with real TLS in front of this for anything beyond a trusted internal network — the app itself serves plain HTTP) |
-| 587 | `postfix` | SMTP submission — what internal services connect to. `AUTH` is mandatory; there is no way to relay without it (postfix-architecture.md §6-8) |
+| 587 (`SUBMISSION_BIND_ADDRESS` in `.env` to restrict) | `postfix` | SMTP submission — what internal services connect to. `AUTH` is mandatory; there is no way to relay without it (postfix-architecture.md §6-8). Published on **every** host interface by default: on a host with a public interface, set `SUBMISSION_BIND_ADDRESS` to its LAN address. AUTH attempts are rate-limited per client IP (`RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE`, configuration.md) and a connection is dropped after 5 errors. |
 
 Postfix's plain SMTP port (25) is intentionally not exposed at all — it's
 bound loopback-only inside the container and used for nothing (this relay

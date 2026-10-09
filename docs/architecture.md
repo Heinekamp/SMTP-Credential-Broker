@@ -180,8 +180,8 @@ docker compose
 │
 ├── postfix    Custom minimal image (Debian + postfix package +
 │              libsasl2-modules), mounts the shared config volume
-│              read-only where possible, exposes 587 (submission)
-│              to internal networks only.
+│              read-only where possible, publishes 587 (submission)
+│              on SUBMISSION_BIND_ADDRESS (default: all interfaces).
 │
 └── postgres   OPTIONAL. Only present if DATABASE_URL is pointed at
                Postgres instead of the default SQLite file. Not part

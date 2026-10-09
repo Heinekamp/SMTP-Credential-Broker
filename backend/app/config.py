@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # upstream-provider-related.
     submission_host: str = "smtp-relay.internal"
     submission_port: int = 587
+    # Postfix smtpd_client_auth_rate_limit: SMTP AUTH commands allowed per
+    # client IP per minute (#171). Generous by default — every internal
+    # service behind the same NAT/Docker host counts as one client. 0
+    # disables the limit.
+    submission_auth_rate_limit_per_minute: int = 60
 
     # Runs the background scheduler (core/scheduler.py — scheduled
     # connection tests, update checks, alert email) as part of the app's

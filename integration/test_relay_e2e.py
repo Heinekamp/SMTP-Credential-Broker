@@ -76,6 +76,31 @@ def test_invalid_credentials_are_rejected(api: httpx.Client, uid: str) -> None:
         client.quit()
 
 
+def test_repeated_failed_auth_in_one_session_is_cut_off(api: httpx.Client, uid: str) -> None:
+    """Regression test for #171: Postfix's default allows 20 errors per
+    session, i.e. 20 password guesses per connection. With
+    smtpd_hard_error_limit = 5 the connection must be dropped by the 5th
+    failed AUTH."""
+    username = f"auth-bruteforce-{uid}"
+    create_local_user(api, name="Brute Force Test", username=username)
+    client = _connect_submission()
+    outcomes = []
+    for attempt in range(8):
+        try:
+            client.login(username, f"wrong-password-{attempt}")
+        except smtplib.SMTPAuthenticationError as exc:
+            outcomes.append(exc.smtp_code)
+        except (smtplib.SMTPServerDisconnected, smtplib.SMTPResponseException):
+            outcomes.append("disconnected")
+            break
+    try:
+        client.close()
+    except Exception:
+        pass
+    assert "disconnected" in outcomes or 421 in outcomes, outcomes
+    assert len(outcomes) <= 6, outcomes
+
+
 def test_failed_auth_does_not_produce_a_phantom_mail_log_row(api: httpx.Client, uid: str) -> None:
     """Regression test: a failed AUTH attempt logs a `warning: ...:
     sasl_username=x` line, which mail_log_parser.py's queue-ID regex used
