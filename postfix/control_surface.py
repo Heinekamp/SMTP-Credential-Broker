@@ -172,16 +172,30 @@ def _sasl_delete_user(payload: dict) -> dict:
     # Idempotent delete (matches the app-side revoke/disable semantics):
     # check existence first with a real command rather than guessing from
     # saslpasswd2's own stderr wording, which is version/locale-dependent.
-    if not _sasl_user_exists(username):
-        return {"ok": True}
-    result = _run(["saslpasswd2", "-d", "-u", SASL_REALM, username])
-    if result.returncode != 0:
-        return {"ok": False, "error": f"saslpasswd2 -d failed: {result.stderr.strip()}"}
+    if _sasl_user_exists(username):
+        result = _run(["saslpasswd2", "-d", "-u", SASL_REALM, username])
+        if result.returncode != 0:
+            return {"ok": False, "error": f"saslpasswd2 -d failed: {result.stderr.strip()}"}
+    # Synced even when the user was already gone from the live sasldb: a
+    # previous delete may have succeeded there but failed to sync, leaving
+    # the volume copy — what entrypoint.sh restores on the next container
+    # start — still holding the revoked credential (#185).
     try:
         _sync_sasldb_to_volume()
     except OSError as exc:
         return {"ok": False, "error": f"saslpasswd2 -d succeeded but syncing to the persisted volume failed: {exc}"}
     return {"ok": True}
+
+
+def _sasl_list_users(payload: dict) -> dict:
+    """Usernames (without the realm) currently in the live sasldb2 — lets
+    `app` reconcile it against its database at startup (#185)."""
+    result = _run(["sasldblistusers2"])
+    if result.returncode != 0:
+        return {"ok": False, "error": f"sasldblistusers2 failed: {result.stderr.strip()}"}
+    suffix = f"@{SASL_REALM}:"
+    usernames = sorted({line.split(suffix, 1)[0] for line in result.stdout.splitlines() if suffix in line})
+    return {"ok": True, "usernames": usernames}
 
 
 def _validate_staged_config(main_cf: str, master_cf: str) -> tuple[bool, str]:
@@ -501,6 +515,7 @@ def _queue_delete(payload: dict) -> dict:
 _HANDLERS = {
     "sasl_set_user": _sasl_set_user,
     "sasl_delete_user": _sasl_delete_user,
+    "sasl_list_users": _sasl_list_users,
     "apply_config": _apply_config,
     "install_tls_certificate": _install_tls_certificate,
     "status": _status,
