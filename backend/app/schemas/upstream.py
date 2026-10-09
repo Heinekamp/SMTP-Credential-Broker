@@ -27,6 +27,9 @@ class UpstreamAccountCreate(BaseModel):
     # None = unlimited (today's behavior) — paced, not rejected, by a
     # synthetic per-account Postfix transport (core/config_generator.py).
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
+    # Verify the upstream server's certificate unless explicitly opted out
+    # (models/upstream.py's tls_skip_verify).
+    tls_skip_verify: bool = False
 
 
 class UpstreamAccountUpdate(BaseModel):
@@ -44,6 +47,7 @@ class UpstreamAccountUpdate(BaseModel):
     password: str | None = None
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
+    tls_skip_verify: bool | None = None
 
 
 class UpstreamAccountRead(BaseModel):
@@ -62,6 +66,7 @@ class UpstreamAccountRead(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     rate_limit_per_hour: int | None
+    tls_skip_verify: bool
     # How many messages this account has actually sent in the last hour —
     # a real Postfix delivery count (mail_log), not the pacing computation
     # itself; read-only, for the API/UI usage readout.

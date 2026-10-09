@@ -68,8 +68,16 @@ smtpd_end_of_data_restrictions =
     check_policy_service inet:app:{{ policy_service_port }}
 
 # ── Upstream (smtp client) TLS ──────────────────────────────────────
-smtp_tls_security_level = encrypt
-smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+# `secure` = TLS is mandatory AND the upstream's certificate must chain to
+# smtp_tls_CAfile and match the nexthop hostname (smtp_tls_secure_cert_match's
+# default "nexthop, dot-nexthop"). `encrypt` alone verifies nothing, so
+# anyone able to intercept the connection would receive AUTH PLAIN with
+# the real upstream password. Accounts that opted out of verification
+# (UpstreamAccount.tls_skip_verify) get `encrypt` via smtp_tls_policy_maps,
+# keyed by their [host]:port nexthop.
+smtp_tls_security_level = secure
+smtp_tls_policy_maps = lmdb:/etc/postfix/relay/tls_policy
+smtp_tls_CAfile = {{ upstream_tls_ca_file }}
 smtp_tls_loglevel = 1
 
 # ── Upstream selection / sender-dependent authentication ────────────

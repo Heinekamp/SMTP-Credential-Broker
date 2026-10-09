@@ -83,16 +83,25 @@ def stub_deliveries() -> list[dict]:
     return httpx.get(f"{STUB_INSPECT_URL}/deliveries", timeout=5).json()
 
 
-def create_upstream_account(api: httpx.Client, *, name: str, username: str, password: str) -> int:
+def create_upstream_account(
+    api: httpx.Client,
+    *,
+    name: str,
+    username: str,
+    password: str,
+    host: str = "upstream-stub",  # Docker Compose service name, resolved from inside the postfix container
+    tls_skip_verify: bool = False,
+) -> int:
     response = api.post(
         "/api/upstream-accounts",
         json={
             "name": name,
-            "host": "upstream-stub",  # Docker Compose service name, resolved from inside the postfix container
+            "host": host,
             "port": 2525,
             "tls_mode": "starttls",
             "username": username,
             "password": password,
+            "tls_skip_verify": tls_skip_verify,
         },
     )
     response.raise_for_status()

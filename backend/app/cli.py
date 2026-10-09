@@ -175,6 +175,7 @@ def test_upstream(account_id: int = typer.Argument(..., help="Upstream account I
             host=account.host,
             port=account.port,
             tls_mode=account.tls_mode,
+            tls_skip_verify=account.tls_skip_verify,
             username=account.username,
             password=password,
         )

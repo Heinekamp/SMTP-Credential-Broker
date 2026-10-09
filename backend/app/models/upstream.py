@@ -37,6 +37,11 @@ class UpstreamAccount(Base):
     # (core/config_generator.py), pacing outbound deliveries rather than
     # rejecting anything, so excess mail just sits in Postfix's own queue.
     rate_limit_per_hour: Mapped[int | None] = mapped_column(nullable=True, default=None)
+    # Opt-out of upstream certificate verification, for a provider whose
+    # certificate doesn't match its hostname or chains to no trusted CA.
+    # False (verify) is the default: an unverified TLS session hands the
+    # upstream password to anyone who can intercept the connection.
+    tls_skip_verify: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
         default=utcnow, nullable=False
     )

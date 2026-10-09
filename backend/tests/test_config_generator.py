@@ -19,18 +19,21 @@ def _upstream(
     tls_mode: TlsMode = TlsMode.starttls,
     port: int = 587,
     rate_limit_per_hour: int | None = None,
+    tls_skip_verify: bool = False,
+    host: str = "smtp.strato.de",
 ) -> UpstreamAccount:
     from app.core.encryption import encrypt_secret
 
     account = UpstreamAccount(
         name=name,
-        host="smtp.strato.de",
+        host=host,
         port=port,
         tls_mode=tls_mode,
         username=username,
         encrypted_password=encrypt_secret("upstream-secret"),
         enabled=enabled,
         rate_limit_per_hour=rate_limit_per_hour,
+        tls_skip_verify=tls_skip_verify,
     )
     db.add(account)
     db.flush()
@@ -160,6 +163,40 @@ def test_starttls_and_implicit_senders_each_get_their_own_transport(db_session: 
         "noreply@example.com\tsmtp:",
         "printer@example.com\tsmtp_implicit_tls:",
     ]
+
+
+def test_upstream_tls_is_verified_unless_an_account_opts_out(db_session: Session) -> None:
+    """Regression test for #153: `encrypt` alone verifies nothing. The
+    default level must be `secure`, the implicit-TLS transports must not
+    override it back down, and only opted-out accounts appear in the
+    tls_policy map — once per [host]:port nexthop, however many senders
+    share that account."""
+    verified = _upstream(db_session, "Verified", "printer@example.com")
+    opted_out = _upstream(
+        db_session, "Self-signed", "legacy@example.com", host="mail.legacy.example", tls_skip_verify=True
+    )
+    _sender(db_session, "printer@example.com", verified)
+    _sender(db_session, "legacy@example.com", opted_out)
+    _sender(db_session, "legacy-alias@example.com", opted_out)
+    implicit = _upstream(db_session, "Implicit", "server@example.com", tls_mode=TlsMode.implicit, port=465)
+    _sender(db_session, "server@example.com", implicit)
+
+    maps, _ = _build_maps(db_session)
+    assert maps["tls_policy"] == "[mail.legacy.example]:587\tencrypt\n"
+
+    main_cf, master_cf = _render_config(db_session)
+    assert "smtp_tls_security_level = secure" in main_cf
+    assert "smtp_tls_policy_maps = lmdb:/etc/postfix/relay/tls_policy" in main_cf
+    assert "smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt" in main_cf
+    assert "smtp_tls_security_level=encrypt" not in master_cf
+
+
+def test_upstream_ca_file_override_is_rendered(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "upstream_tls_ca_file", "/upstream-ca/bundle.crt")
+    main_cf, _ = _render_config(db_session)
+    assert "smtp_tls_CAfile = /upstream-ca/bundle.crt" in main_cf
 
 
 def test_generated_config_never_delivers_unrouted_mail_directly(db_session: Session) -> None:

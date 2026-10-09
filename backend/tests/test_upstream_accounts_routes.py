@@ -139,6 +139,26 @@ def test_create_defaults_to_unlimited(admin_client: TestClient) -> None:
     assert created["rate_limit_per_hour"] is None
 
 
+def test_create_verifies_upstream_tls_by_default(admin_client: TestClient) -> None:
+    created = _create(admin_client)
+    assert created["tls_skip_verify"] is False
+
+
+def test_tls_skip_verify_can_be_set_and_cleared(admin_client: TestClient, db_session: Session) -> None:
+    created = _create(admin_client, tls_skip_verify=True)
+    assert created["tls_skip_verify"] is True
+
+    response = admin_client.patch(
+        f"/api/upstream-accounts/{created['id']}",
+        json={"tls_skip_verify": False},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 200
+    assert response.json()["tls_skip_verify"] is False
+    db_session.expire_all()
+    assert db_session.get(UpstreamAccount, created["id"]).tls_skip_verify is False
+
+
 def test_create_rejects_a_non_positive_rate_limit(admin_client: TestClient) -> None:
     response = admin_client.post(
         "/api/upstream-accounts",
