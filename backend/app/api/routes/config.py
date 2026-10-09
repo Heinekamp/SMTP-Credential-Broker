@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_admin, get_db, require_csrf
 from app.core.audit import client_ip, record_audit
 from app.core.config_generator import generate_and_apply
+from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured
 from app.core.postfix_control import PostfixControlError
 from app.models.admin import AdminUser
 from app.models.config_generation import ConfigGeneration
@@ -20,6 +21,9 @@ def generate_config(
 ) -> GenerationResult:
     try:
         outcome = generate_and_apply(db, triggered_by_admin_id=admin.id)
+    except (EncryptionKeyNotConfigured, DecryptionFailed) as exc:
+        # sasl_passwd needs every upstream password decrypted (#187).
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except PostfixControlError as exc:
         # Unreachable control surface is an infrastructure problem, not a
         # bad-config problem — no config_generations row is recorded for
@@ -50,7 +54,10 @@ def generate_config(
 
 @router.post("/validate", response_model=GenerationResult, dependencies=[Depends(require_csrf)])
 def validate_config(db: Session = Depends(get_db)) -> GenerationResult:
-    outcome = generate_and_apply(db, triggered_by_admin_id=None, dry_run=True)
+    try:
+        outcome = generate_and_apply(db, triggered_by_admin_id=None, dry_run=True)
+    except (EncryptionKeyNotConfigured, DecryptionFailed) as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     return GenerationResult(
         generation_id=outcome.generation_id,
         success=outcome.success,

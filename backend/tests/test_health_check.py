@@ -110,3 +110,43 @@ def test_latest_failed_attempt_degrades_status_even_with_a_good_config_active(
     report = run_health_check(db_session)
     assert report.last_generation_result == "fail"
     assert report.status == "degraded"
+
+
+def test_a_broken_encryption_key_degrades_health_instead_of_raising(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for #187: the drift check decrypts every upstream
+    password; a missing/wrong key used to raise straight out of
+    run_health_check — a 500 on /api/health and a dead alerts loop."""
+    from app.core.config_generator import generate_and_apply
+    from app.core.encryption import DecryptionFailed
+
+    _fake_running(monkeypatch)
+    monkeypatch.setattr(
+        "app.core.config_generator.postfix_control.apply_config",
+        lambda **kwargs: ApplyConfigResult(success=True, validation_detail="postconf: OK", reloaded=True),
+    )
+    account = UpstreamAccount(
+        name="STRATO",
+        host="smtp.strato.de",
+        port=587,
+        tls_mode=TlsMode.starttls,
+        username="printer@example.com",
+        encrypted_password=encrypt_secret("secret"),
+        enabled=True,
+    )
+    db_session.add(account)
+    db_session.flush()
+    db_session.add(Sender(address="printer@example.com", upstream_account_id=account.id))
+    db_session.commit()
+    assert generate_and_apply(db_session, triggered_by_admin_id=None).success is True
+
+    def _wrong_key(_ciphertext):
+        raise DecryptionFailed("Ciphertext failed authentication — wrong encryption key?")
+
+    monkeypatch.setattr("app.core.config_generator.decrypt_secret", _wrong_key)
+
+    report = run_health_check(db_session)
+    assert report.status == "degraded"
+    assert report.config_in_sync.ok is False
+    assert "wrong encryption key" in report.config_in_sync.detail

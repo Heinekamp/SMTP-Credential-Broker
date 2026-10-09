@@ -50,3 +50,19 @@ def test_validate_endpoint_never_touches_the_control_surface(
     response = admin_client.post("/api/config/validate", headers=csrf_headers(admin_client))
     assert response.status_code == 200
     assert response.json()["success"] is True
+
+
+def test_generate_and_validate_return_503_when_secrets_cannot_be_decrypted(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for #187: a missing/wrong key used to be a bare 500."""
+    from app.core.encryption import EncryptionKeyNotConfigured
+
+    def _no_key(*args, **kwargs):
+        raise EncryptionKeyNotConfigured("Encryption key not configured")
+
+    monkeypatch.setattr("app.api.routes.config.generate_and_apply", _no_key)
+    for path in ("/api/config/generate", "/api/config/validate"):
+        response = admin_client.post(path, headers=csrf_headers(admin_client))
+        assert response.status_code == 503, path
+        assert "Encryption key not configured" in response.json()["detail"]

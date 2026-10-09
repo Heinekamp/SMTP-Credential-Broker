@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core import postfix_control
 from app.core.config_generator import current_state_checksums
+from app.core.encryption import DecryptionFailed, EncryptionKeyNotConfigured
 from app.models.config_generation import ConfigGeneration
 from app.models.enums import ValidationResult
 
@@ -71,16 +72,24 @@ def run_health_check(db: Session) -> HealthReport:
     if never_configured:
         config_in_sync = CheckResult(ok=False, detail="no configuration has ever been successfully applied yet")
     else:
-        main_master_checksum, maps_checksum = current_state_checksums(db)
-        in_sync = main_master_checksum == last_good.checksum and maps_checksum == last_good.maps_checksum
-        config_in_sync = CheckResult(
-            ok=in_sync,
-            detail=(
-                ""
-                if in_sync
-                else "current database state differs from the last applied configuration — regenerate to apply"
-            ),
-        )
+        try:
+            main_master_checksum, maps_checksum = current_state_checksums(db)
+        except (EncryptionKeyNotConfigured, DecryptionFailed) as exc:
+            # Rendering the maps decrypts every upstream password. A missing
+            # or wrong key is a degraded relay to report, not an exception
+            # that turns /api/health, the alerts bell and alert email into
+            # 500s — exactly when alerting matters most (#187).
+            config_in_sync = CheckResult(ok=False, detail=f"cannot check configuration: {exc}")
+        else:
+            in_sync = main_master_checksum == last_good.checksum and maps_checksum == last_good.maps_checksum
+            config_in_sync = CheckResult(
+                ok=in_sync,
+                detail=(
+                    ""
+                    if in_sync
+                    else "current database state differs from the last applied configuration — regenerate to apply"
+                ),
+            )
 
     healthy = (
         database.ok
