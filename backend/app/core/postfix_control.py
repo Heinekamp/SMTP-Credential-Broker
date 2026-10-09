@@ -66,6 +66,11 @@ def sasl_delete_user(username: str) -> None:
     _call("sasl_delete_user", {"username": username})
 
 
+def sasl_list_users() -> list[str]:
+    """Usernames currently present in the live sasldb2 (without the realm)."""
+    return _call("sasl_list_users", {})["usernames"]
+
+
 @dataclasses.dataclass
 class ApplyConfigResult:
     success: bool

@@ -27,7 +27,13 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> subproces
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_delete_is_a_noop_when_sasldblistusers2_shows_the_user_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delete_of_an_absent_user_skips_saslpasswd2_but_still_syncs_the_volume(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression test for #185: an earlier delete may have succeeded in the
+    live sasldb2 but failed to sync — the retry used to see the user gone
+    and return early, leaving the volume copy (restored on the next
+    container start) still holding the revoked credential."""
     calls: list[list[str]] = []
 
     def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -36,11 +42,25 @@ def test_delete_is_a_noop_when_sasldblistusers2_shows_the_user_absent(monkeypatc
         return _completed(0, stdout="other@smtp-relay.internal: userPassword\n")
 
     monkeypatch.setattr(control_surface, "_run", fake_run)
+    sasldb_path, sasldb_dir = _patch_sasldb_paths(monkeypatch, tmp_path, seed="live-without-inventree")
+    (sasldb_dir / "sasldb2").write_text("stale-copy-still-with-inventree", encoding="utf-8")
 
     result = control_surface._sasl_delete_user({"username": "inventree"})
 
     assert result == {"ok": True}
     assert len(calls) == 1
+    assert (sasldb_dir / "sasldb2").read_text(encoding="utf-8") == "live-without-inventree"
+
+
+def test_sasl_list_users_strips_the_realm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        control_surface,
+        "_run",
+        lambda args, **kwargs: _completed(
+            0, stdout="wordpress@smtp-relay.internal: userPassword\ninventree@smtp-relay.internal: userPassword\n"
+        ),
+    )
+    assert control_surface._sasl_list_users({}) == {"ok": True, "usernames": ["inventree", "wordpress"]}
 
 
 def _patch_sasldb_paths(monkeypatch: pytest.MonkeyPatch, tmp_path, *, seed: str = "") -> tuple[Path, Path]:

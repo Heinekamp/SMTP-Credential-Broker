@@ -36,6 +36,7 @@ from app.core.rate_limit_cleanup import rate_limit_cleanup_tick
 from app.core.rate_limit_policy import run_policy_service
 from app.core.request_context import set_request_id
 from app.core.retention import retention_cleanup_tick
+from app.core.sasldb_reconcile import reconcile_sasldb
 from app.core.scheduled_tests import connection_test_tick
 from app.core.scheduler import run_periodic
 from app.core.update_check import update_check_tick
@@ -67,6 +68,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         db = SessionLocal()
         try:
             sync_certificate_to_postfix(db)
+            # Revoked credentials must stay revoked even if the sasldb2
+            # volume copy drifted from the database (#185).
+            reconcile_sasldb(db)
         finally:
             db.close()
 
