@@ -329,9 +329,10 @@ everyone else" — only the transport selection changes, never how the
 destination is found. Without `smtp_implicit_tls`/wrappermode, an
 implicit-TLS account fails with "lost connection ... while receiving the
 initial server greeting" — Postfix waiting for a plaintext greeting a
-wrapped-TLS server will never send. Senders needing neither treatment are
-simply absent from this map and fall through to the default `smtp`
-transport unaffected.
+wrapped-TLS server will never send. Senders needing neither treatment
+still get an explicit plain `smtp:` entry. Falling through is no longer
+an option, because the default transport is the error transport that
+bounces unrouted mail (§2, #151).
 
 Each source file is converted with `postmap lmdb:/etc/postfix/relay/<name>`
 into `<name>.lmdb`, which is what the running `main.cf` directives actually
