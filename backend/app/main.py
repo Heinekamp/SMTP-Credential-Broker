@@ -124,17 +124,15 @@ app.include_router(tls_settings.router, prefix="/api")
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def _spa_file(static_dir: Path, full_path: str) -> Path:
-    """The file the SPA fallback should serve for `full_path`: that static
-    asset if it really exists *inside* `static_dir`, otherwise index.html.
-    `full_path` is attacker-controlled and already percent-decoded, so
-    `..` segments (`/%2e%2e/...`, `/..%2f...`) and absolute paths
-    (`//etc/...`, which `Path.__truediv__` lets replace the base) must not
-    escape the static dir — resolve first, then check containment."""
-    candidate = (static_dir / full_path).resolve()
-    if full_path and candidate.is_relative_to(static_dir) and candidate.is_file():
-        return candidate
-    return static_dir / "index.html"
+def _static_files(static_dir: Path) -> dict[str, Path]:
+    """Every file under `static_dir`, keyed by its URL path relative to it
+    (`favicon.svg`, `assets/index-abc.js`). The SPA fallback serves only
+    files found in this map, so the request path (attacker-controlled and
+    already percent-decoded — `/%2e%2e/...`, `//etc/...`,
+    GHSA-rrxc-69f9-24wx) is only ever used as a dict key, never joined
+    onto a filesystem path. The static dir is baked into the image at
+    build time, so a snapshot taken at startup is complete."""
+    return {p.relative_to(static_dir).as_posix(): p for p in static_dir.rglob("*") if p.is_file()}
 
 
 if _STATIC_DIR.is_dir():
@@ -144,7 +142,9 @@ if _STATIC_DIR.is_dir():
     # react-router take over (architecture.md §6's Docker topology assumes
     # this — the "app" container serves both the API and the SPA).
     app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
+    _SPA_FILES = _static_files(_STATIC_DIR)
+    _SPA_INDEX = _STATIC_DIR / "index.html"
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str) -> FileResponse:
-        return FileResponse(_spa_file(_STATIC_DIR, full_path))
+        return FileResponse(_SPA_FILES.get(full_path, _SPA_INDEX))
