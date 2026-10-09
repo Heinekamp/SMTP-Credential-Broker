@@ -113,6 +113,7 @@ fully explained walkthrough that assumes no prior experience.
 - [Upgrading](docs/upgrading.md)
 - [Architecture](docs/architecture.md)
 - [Security model](docs/security-model.md)
+- [Security policy & vulnerability reporting](SECURITY.md)
 - [Database schema](docs/database-schema.md)
 
 ## License
