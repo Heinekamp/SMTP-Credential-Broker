@@ -3,7 +3,13 @@ import ssl
 
 import pytest
 
-from app.core.smtp_transport import connect_and_greet, safe_quit, upgrade_to_starttls
+from app.core.smtp_transport import (
+    connect_and_greet,
+    default_client_factory,
+    safe_quit,
+    tls_context,
+    upgrade_to_starttls,
+)
 from app.models.enums import TlsMode
 
 
@@ -24,6 +30,7 @@ class FakeSmtpClient:
         self._quit_exc = quit_exc
         self.ehlo_calls = 0
         self.quit_called = False
+        self.starttls_context: ssl.SSLContext | None = None
 
     def connect(self, host: str, port: int) -> tuple[int, bytes]:
         if self._connect_exc:
@@ -35,6 +42,7 @@ class FakeSmtpClient:
         return (250, b"hello.example.com")
 
     def starttls(self, context: ssl.SSLContext | None = None) -> tuple[int, bytes]:
+        self.starttls_context = context
         if self._starttls_exc:
             raise self._starttls_exc
         return self._starttls_result
@@ -52,7 +60,12 @@ class FakeSmtpClient:
 def test_connect_and_greet_returns_client_and_decoded_greeting() -> None:
     fake = FakeSmtpClient()
     client, greeting = connect_and_greet(
-        host="smtp.example.com", port=587, tls_mode=TlsMode.starttls, timeout=5.0, client_factory=lambda t: fake
+        host="smtp.example.com",
+        port=587,
+        tls_mode=TlsMode.starttls,
+        skip_verify=False,
+        timeout=5.0,
+        client_factory=lambda t: fake,
     )
     assert client is fake
     assert greeting == "220 hello.example.com ESMTP"
@@ -63,13 +76,18 @@ def test_connect_and_greet_propagates_the_underlying_exception_unchanged() -> No
     fake = FakeSmtpClient(connect_exc=ConnectionRefusedError("refused"))
     with pytest.raises(ConnectionRefusedError):
         connect_and_greet(
-            host="smtp.example.com", port=587, tls_mode=TlsMode.starttls, timeout=5.0, client_factory=lambda t: fake
+            host="smtp.example.com",
+            port=587,
+            tls_mode=TlsMode.starttls,
+            skip_verify=False,
+            timeout=5.0,
+            client_factory=lambda t: fake,
         )
 
 
 def test_upgrade_to_starttls_does_ehlo_starttls_ehlo_and_returns_decoded_response() -> None:
     fake = FakeSmtpClient()
-    detail = upgrade_to_starttls(fake)
+    detail = upgrade_to_starttls(fake, skip_verify=False)
     assert detail == "220 2.0.0 Ready to start TLS"
     assert fake.ehlo_calls == 2
 
@@ -77,10 +95,46 @@ def test_upgrade_to_starttls_does_ehlo_starttls_ehlo_and_returns_decoded_respons
 def test_upgrade_to_starttls_propagates_starttls_failure() -> None:
     fake = FakeSmtpClient(starttls_exc=smtplib.SMTPException("STARTTLS failed"))
     with pytest.raises(smtplib.SMTPException):
-        upgrade_to_starttls(fake)
+        upgrade_to_starttls(fake, skip_verify=False)
 
 
 def test_safe_quit_swallows_any_exception() -> None:
     fake = FakeSmtpClient(quit_exc=OSError("already closed"))
     safe_quit(fake)  # must not raise
     assert fake.quit_called is True
+
+
+def test_tls_context_verifies_certificate_and_hostname_by_default() -> None:
+    """Regression test for #153: upstream TLS sessions must authenticate the
+    server, or anyone able to intercept them receives the upstream password."""
+    context = tls_context(skip_verify=False)
+    assert context.verify_mode is ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+
+def test_tls_context_skip_verify_disables_both_checks() -> None:
+    context = tls_context(skip_verify=True)
+    assert context.verify_mode is ssl.CERT_NONE
+    assert context.check_hostname is False
+
+
+def test_starttls_upgrade_uses_a_verifying_context() -> None:
+    fake = FakeSmtpClient()
+    upgrade_to_starttls(fake, skip_verify=False)
+    assert fake.starttls_context is not None
+    assert fake.starttls_context.verify_mode is ssl.CERT_REQUIRED
+
+
+def test_implicit_tls_client_verifies_the_server() -> None:
+    """smtplib.SMTP_SSL constructed without context= falls back to
+    ssl._create_stdlib_context(), which checks nothing — the factory must
+    always pass an explicit verifying context."""
+    client = default_client_factory(TlsMode.implicit, skip_verify=False)(5.0)
+    assert isinstance(client, smtplib.SMTP_SSL)
+    assert client.context.verify_mode is ssl.CERT_REQUIRED
+    assert client.context.check_hostname is True
+
+
+def test_implicit_tls_client_honours_skip_verify() -> None:
+    client = default_client_factory(TlsMode.implicit, skip_verify=True)(5.0)
+    assert client.context.verify_mode is ssl.CERT_NONE

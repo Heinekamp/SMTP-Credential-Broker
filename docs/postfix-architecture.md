@@ -125,7 +125,8 @@ smtpd_end_of_data_restrictions =
     check_policy_service inet:app:10030
 
 # ── Upstream (smtp client) TLS ──────────────────────────────────────
-smtp_tls_security_level = encrypt
+smtp_tls_security_level = secure
+smtp_tls_policy_maps = lmdb:/etc/postfix/relay/tls_policy
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 smtp_tls_loglevel = 1
 
@@ -218,6 +219,23 @@ default_transport = error:5.7.1 No upstream route for this sender
   enabled, and `sender_login` applies the same filter, so a sender whose
   upstream is disabled is rejected at `RCPT TO` rather than reaching this
   fallback.
+- **`smtp_tls_security_level = secure`** — TLS to the upstream is mandatory
+  **and authenticated**: the certificate must chain to `smtp_tls_CAfile` and
+  match the nexthop hostname (`smtp_tls_secure_cert_match`'s default
+  `nexthop, dot-nexthop`, i.e. the host configured on the upstream
+  account). The weaker `encrypt` level, used before #153, makes TLS
+  mandatory but verifies nothing, so anyone able to intercept the
+  connection (DNS spoofing, an on-path attacker) would have received
+  `AUTH PLAIN` with the real upstream password. `smtp_tls_CAfile` is the
+  system bundle unless `RELAY_UPSTREAM_TLS_CA_FILE` overrides it
+  (configuration.md), for an upstream behind a private CA.
+- **`smtp_tls_policy_maps`** — the per-account opt-out. An upstream account
+  with **Skip certificate verification** set
+  (`upstream_accounts.tls_skip_verify`) gets a `[host]:port  encrypt` entry
+  (§4), so delivery to it stays encrypted but unauthenticated. Meant only for
+  a provider whose certificate doesn't match its hostname. Every other
+  account inherits `secure`, and so do the implicit-TLS transports in
+  `master.cf` (§3), which set no level of their own.
 - **`smtp_sasl_password_maps`** — the credentials the outbound `smtp` client
   presents, looked up first by sender (because of
   `smtp_sender_dependent_authentication`), format `key  username:password`.
@@ -333,6 +351,16 @@ wrapped-TLS server will never send. Senders needing neither treatment
 still get an explicit plain `smtp:` entry. Falling through is no longer
 an option, because the default transport is the error transport that
 bounces unrouted mail (§2, #151).
+
+`/etc/postfix/relay/tls_policy` (usually empty):
+
+```text
+[mail.legacy-provider.example]:587    encrypt
+```
+
+One entry per upstream account that opted out of certificate verification
+(§2), keyed by the same `[host]:port` nexthop `sender_relayhost` produces,
+so it applies to every sender using that account.
 
 Each source file is converted with `postmap lmdb:/etc/postfix/relay/<name>`
 into `<name>.lmdb`, which is what the running `main.cf` directives actually

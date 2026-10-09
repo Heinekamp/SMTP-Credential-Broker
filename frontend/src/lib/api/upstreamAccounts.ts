@@ -18,6 +18,8 @@ export interface UpstreamAccount {
   updated_at: string;
   /** null = unlimited. */
   rate_limit_per_hour: number | null;
+  /** true = this account opted out of upstream certificate verification. */
+  tls_skip_verify: boolean;
   /** A real delivery count over the last hour (mail_log), not the pacing
    * computation itself. */
   sent_this_hour: number;
@@ -35,6 +37,7 @@ export interface UpstreamAccountInput {
   enabled?: boolean;
   /** null = unlimited. */
   rate_limit_per_hour?: number | null;
+  tls_skip_verify?: boolean;
 }
 
 export interface DeletePrecheck {

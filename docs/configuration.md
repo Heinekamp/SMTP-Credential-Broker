@@ -131,6 +131,7 @@ this feature is purely an additional, automated path, not a requirement.
 
 | Variable | Default | Notes |
 |---|---|---|
+| `RELAY_UPSTREAM_TLS_CA_FILE` | *(system trust store)* | CA bundle that upstream providers' certificates are verified against, by both Postfix (`smtp_tls_CAfile`) and the app's own upstream connections (Test Connection, scheduled tests, alert email). Set it only for an upstream behind a private CA, and mount the file at the same path in **both** the `app` and `postfix` containers. To skip verification for one provider instead, use the upstream account's **Skip certificate verification** option. |
 | `RELAY_ACME_DIRECTORY_URL` | Let's Encrypt production | Deliberately an environment variable, not a Settings toggle — a UI switch would risk a production relay being silently left pinned to Let's Encrypt's **staging** directory (whose certificates nothing trusts). Override only for manual verification against staging. |
 
 ## Scheduled testing, update checks, and alert email
