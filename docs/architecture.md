@@ -48,7 +48,7 @@ write it out, validate it, and apply it.
 ┌──────────────────────────────────────────────────────────▼─────────┐
 │                       "postfix" container                          │
 │                                                                     │
-│  main.cf / master.cf   sasl_passwd.db   sender_login.db   sasldb2  │
+│  main.cf / master.cf   lookup maps (relay/*.lmdb)         sasldb2  │
 │         │                    │                │              │     │
 │         ▼                    ▼                ▼              ▼     │
 │                        postfix (smtpd, smtp, cleanup, qmgr, ...)    │
@@ -263,6 +263,8 @@ in the `app` image so the system stays manageable if the web UI is down:
 
 ```text
 relay create-admin              # bootstraps an admin without the web UI
+relay reset-admin-password      # sets a new password for an admin (signs out their sessions)
+relay disable-totp              # removes an admin's TOTP, e.g. after a lost authenticator
 relay generate-encryption-key   # prints a fresh base64 32-byte key
 relay rotate-encryption-key     # re-encrypts every stored secret under a new key
 relay doctor                    # runs the health checks above, human-readable

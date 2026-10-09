@@ -23,7 +23,7 @@ assumed. If you already know your way around Docker, the shorter
   certificate** — read [the next section](#do-you-need-a-real-tls-certificate)
   before deciding whether to skip this. Any domain works, from any
   registrar. Cloudflare-managed DNS makes issuance fully automated in
-  [step 8](#8-setting-up-real-tls-with-lets-encrypt); any other DNS host
+  [step 8](#8-setting-up-real-tls-with-lets-encrypt-optional); any other DNS host
   still works too, just with one manual step instead.
 
 ## Do you need a real TLS certificate?
@@ -110,12 +110,16 @@ extracted folder.
 
 Either way, **use the newest tagged release**, not the `main` branch.
 Releases are tested checkpoints; `main` can be mid-change at any given
-moment. If you used `git clone` above, switch to the latest release tag
+moment. If you used `git clone` above, switch to the newest release tag
 with:
 
 ```bash
-git checkout v0.3.2   # replace with whatever the current release tag is
+git checkout "$(git tag --sort=-v:refname | head -n 1)"
 ```
+
+(That picks the highest version number among the release tags. To use
+a specific release instead, `git checkout v0.3.4` with its tag from the
+Releases page.)
 
 ## 4. Configuring your `.env` file
 
