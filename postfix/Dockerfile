@@ -26,6 +26,7 @@ RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-se
         python3 \
         openssl \
         ca-certificates \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 # The placeholder self-signed cert that smtpd_tls_cert_file/key_file
@@ -97,4 +98,9 @@ RUN chmod +x /entrypoint.sh
 # so `app` can't read sasl_passwd's plaintext upstream passwords (#159).
 VOLUME ["/etc/postfix/relay"]
 
-ENTRYPOINT ["/entrypoint.sh"]
+# tini as PID 1 (#197): it reaps the Postfix daemons that every
+# `postfix stop`/`start` cycle re-parents to PID 1, and forwards
+# `docker stop`'s SIGTERM to the control surface, which then stops Postfix
+# cleanly. With the control surface itself as PID 1, unhandled signals were
+# ignored by the kernel — every stop waited 10s and ended in SIGKILL.
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
