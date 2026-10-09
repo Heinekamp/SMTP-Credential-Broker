@@ -14,12 +14,13 @@ services:
     restart: unless-stopped
     volumes:
       - app_data:/data
-      # Read-only from app's side: the control socket lives here (app
-      # connects to it), but app never writes files here directly — every
+      # Only the control socket lives here (app connects to it). Every
       # config/sasldb2 mutation goes through the control surface RPC
-      # (security-model.md §6), enforced in code and, defense-in-depth,
-      # by this mount flag.
-      - relay_config:/shared-config:ro
+      # (security-model.md §6), and read-only is defence in depth. It's
+      # deliberately its own volume, not relay_config: that one holds the
+      # generated maps, including sasl_passwd with the plaintext upstream
+      # passwords, which `app` must not be able to read back (#159).
+      - control_socket:/shared-config:ro
     ports:
       # Host-side port only — override via APP_HOST_PORT (.env) if 8000 is
       # already taken by something else on the host (e.g. Portainer).
@@ -56,6 +57,8 @@ services:
     restart: unless-stopped
     volumes:
       - relay_config:/etc/postfix/relay
+      # The control surface's socket, shared with `app` (see its mount).
+      - control_socket:/run/relay-control
       # Overwrite with a real certificate/key for anything beyond local
       # testing — see docs/installation.md's TLS section. Left as a named
       # volume (not a bind mount) so a fresh deployment still works out of
@@ -116,6 +119,7 @@ services:
 volumes:
   app_data:
   relay_config:
+  control_socket:
   postfix_tls:
   sasldb:
   postfix_queue:

@@ -95,11 +95,10 @@ COPY control_surface.py /control_surface.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Shared volume: map source files (sender_login, sender_relayhost,
-# sasl_passwd) and the control socket live here — writable by this
-# container (the control surface writes them), read-only from `app`'s side
-# in docker-compose.yml, since `app` only ever talks to the socket, never
-# the files directly.
+# Generated lookup maps (sender_login, sender_relayhost, sasl_passwd, ...)
+# live here. Private to this container: the control socket that `app`
+# talks to is on its own volume (/run/relay-control, docker-compose.yml),
+# so `app` can't read sasl_passwd's plaintext upstream passwords (#159).
 VOLUME ["/etc/postfix/relay"]
 
 ENTRYPOINT ["/entrypoint.sh"]

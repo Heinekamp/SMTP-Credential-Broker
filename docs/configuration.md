@@ -44,7 +44,7 @@ right level of friction.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `relay_config` volume already wires this up correctly on both sides — only change this if you've renamed that volume's mount point. |
+| `RELAY_POSTFIX_CONTROL_SOCKET` | `/shared-config/control.sock` | Where `app` expects to find the Postfix container's control-surface Unix socket (security-model.md §6). The production compose file's `control_socket` volume already wires this up correctly on both sides — only change this if you've changed that volume's mount point in `app`. |
 | `RELAY_POSTFIX_CONTROL_TIMEOUT` | `15.0` | Seconds `app` waits for a control-surface response before treating it as unreachable (surfaced as a 503, e.g. on "Test Connection" or config generation). |
 
 ## Sending rate limits

@@ -1,12 +1,17 @@
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from app.api.deps import get_current_admin, require_csrf
 from app.core.postfix_control import PostfixControlError, queue_delete, queue_list, queue_requeue
 from app.schemas.queue import QueueEntry, QueueRecipient
 
 router = APIRouter(prefix="/queue", tags=["queue"], dependencies=[Depends(get_current_admin)])
+
+# A single Postfix queue ID (short or long format). Rejects postsuper's
+# special `ALL`, which would retry or delete every queued message (#159);
+# control_surface.py enforces the same rule on its side.
+QueueId = Path(pattern=r"^[0-9A-Za-z]{6,20}$")
 
 
 def _to_entry(raw: dict) -> QueueEntry:
@@ -33,7 +38,7 @@ def list_queue() -> list[QueueEntry]:
 
 
 @router.post("/{queue_id}/retry", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
-def retry_message(queue_id: str) -> None:
+def retry_message(queue_id: str = QueueId) -> None:
     try:
         queue_requeue(queue_id)
     except PostfixControlError as exc:
@@ -41,7 +46,7 @@ def retry_message(queue_id: str) -> None:
 
 
 @router.delete("/{queue_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_csrf)])
-def delete_message(queue_id: str) -> None:
+def delete_message(queue_id: str = QueueId) -> None:
     try:
         queue_delete(queue_id)
     except PostfixControlError as exc:

@@ -16,7 +16,7 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     volumes:
-      - relay_config_test:/shared-config:ro
+      - control_socket_test:/shared-config:ro
       - upstream_ca_test:/upstream-ca:ro
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
@@ -40,6 +40,7 @@ services:
       context: ../postfix
     volumes:
       - relay_config_test:/etc/postfix/relay
+      - control_socket_test:/run/relay-control
       # Same fix as production's docker-compose.yml (issue #118) — without
       # this, test_local_user_password_survives_postfix_container_recreation
       # would correctly fail, since the underlying persistence, not just
@@ -73,6 +74,7 @@ services:
 
 volumes:
   relay_config_test:
+  control_socket_test:
   sasldb_test:
   postfix_queue_test:
   upstream_ca_test:
