@@ -215,10 +215,16 @@ def _install_maps(maps: dict[str, str]) -> None:
     for name, content in maps.items():
         # `name` is one of _MAP_NAMES (_require_maps) — never a path.
         source_path = os.path.join(RELAY_MAP_DIR, name)
-        _write_file(source_path, content, 0o600 if name in _SECRET_MAP_NAMES else 0o644)
+        mode = 0o600 if name in _SECRET_MAP_NAMES else 0o644
+        _write_file(source_path, content, mode)
         result = _run(["postmap", f"{MAP_TYPE}:{source_path}"])
         if result.returncode != 0:
             raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
+        # postmap only copies the source's permissions when it *creates*
+        # the database; an existing one (from an earlier version, on the
+        # persistent relay_config volume) is updated in place and keeps its
+        # old mode — 0644 for sasl_passwd.lmdb on every pre-#159 install (#163).
+        os.chmod(f"{source_path}.{MAP_TYPE}", mode)
 
 
 def _install_config(main_cf: str, master_cf: str) -> dict[str, str | None]:
