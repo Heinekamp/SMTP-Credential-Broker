@@ -137,9 +137,20 @@ confused.
   value the SPA must echo back in a custom request header on every
   state-changing request) — appropriate given the API is same-site, cookie
   authenticated, and consumed by our own SPA rather than third parties.
-- **Rate limiting**: login attempts are rate-limited per source IP and per
-  account (exponential backoff), with attempts and lockouts recorded in
-  `audit_log`.
+- **Rate limiting**: login attempts are rate-limited with escalating
+  lockouts, recorded in `audit_log` and evaluated one at a time so parallel
+  requests can't slip past the check (#157). There are three counters:
+  - per (account, source IP): stops brute force from one source without
+    locking the real admin out from elsewhere;
+  - account-wide, with 4× higher thresholds: catches guessing spread
+    across many IPs;
+  - per source IP for emails matching no account: spray protection that
+    never blocks a real account's login.
+
+  The first and third use identical thresholds, so the 401-then-429
+  pattern doesn't reveal whether an email belongs to an admin.
+  See [known-limitations.md](known-limitations.md) for the reverse-proxy
+  client-IP caveat.
 - **TOTP (optional)**: `pyotp`-based TOTP, off by default, enabled per-admin.
   Secrets stored encrypted the same way upstream passwords are (§2) — a TOTP
   secret is exactly as sensitive as a password and gets the same treatment,

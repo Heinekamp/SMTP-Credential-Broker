@@ -157,3 +157,61 @@ def test_lockout_blocks_further_attempts_from_the_same_client(
     # core/rate_limit.py in test_rate_limit.py, where each IP can actually
     # be controlled.
     assert response.status_code == 429
+
+
+def test_concurrent_wrong_logins_cannot_exceed_the_lockout(tmp_path, monkeypatch) -> None:
+    """Regression test for #157: the rate-limit check used to run before
+    the slow Argon2 verify with nothing serializing them, so a burst of
+    parallel attempts all passed the check before any failure was counted
+    — about 40 guesses per lockout window instead of 5. Each request gets
+    its own DB session here (the shared `client` fixture's single session
+    isn't thread-safe), and verify is slowed down to make the race wide."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.api import deps
+    from app.api.routes import auth as auth_routes
+    from app.db.base import Base
+    from app.main import app
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with session_factory() as setup_session:
+        setup_session.add(AdminUser(email=EMAIL, password_hash=hash_password(PASSWORD)))
+        setup_session.commit()
+
+    def _per_request_session():
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    real_verify = auth_routes.verify_password
+
+    def _slow_verify(password_hash: str, password: str) -> bool:
+        time.sleep(0.05)
+        return real_verify(password_hash, password)
+
+    monkeypatch.setattr(auth_routes, "verify_password", _slow_verify)
+    app.dependency_overrides[deps.get_db] = _per_request_session
+    try:
+        with TestClient(app) as concurrent_client, ThreadPoolExecutor(max_workers=20) as pool:
+            codes = list(
+                pool.map(
+                    lambda _: concurrent_client.post(
+                        "/api/auth/login", json={"email": EMAIL, "password": "wrong"}
+                    ).status_code,
+                    range(20),
+                )
+            )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert codes.count(401) == 5, codes
+    assert codes.count(429) == 15, codes
