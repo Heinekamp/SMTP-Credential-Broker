@@ -1,7 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from app.core.postfix_control import PostfixControlError
+from app.models.audit import AuditLog
 from tests.conftest import csrf_headers
 
 _RAW_ENTRY = {
@@ -76,3 +78,41 @@ def test_queue_id_all_is_rejected_before_reaching_postfix(
     path = "/api/queue/ALL/retry" if method == "post" else "/api/queue/ALL"
     response = getattr(admin_client, method)(path, headers=csrf_headers(admin_client))
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "patched", "action"),
+    [
+        ("post", "/api/queue/4XYZ000001/retry", "queue_requeue", "queue.retry"),
+        ("delete", "/api/queue/4XYZ000001", "queue_delete", "queue.delete"),
+    ],
+)
+def test_queue_actions_are_audited(
+    admin_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+    patched: str,
+    action: str,
+) -> None:
+    monkeypatch.setattr(f"app.api.routes.queue.{patched}", lambda queue_id: None)
+
+    response = getattr(admin_client, method)(path, headers=csrf_headers(admin_client))
+    assert response.status_code == 204
+    row = db_session.query(AuditLog).filter(AuditLog.action == action).one()
+    assert row.target_type == "queue_message"
+    assert row.detail == {"queue_id": "4XYZ000001"}
+    assert row.admin_user_id is not None
+
+
+def test_failed_queue_action_is_not_audited(
+    admin_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(queue_id: str) -> None:
+        raise PostfixControlError("unreachable")
+
+    monkeypatch.setattr("app.api.routes.queue.queue_delete", _boom)
+    response = admin_client.delete("/api/queue/4XYZ000001", headers=csrf_headers(admin_client))
+    assert response.status_code == 503
+    assert db_session.query(AuditLog).filter(AuditLog.action == "queue.delete").count() == 0
