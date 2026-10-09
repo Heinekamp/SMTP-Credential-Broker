@@ -63,8 +63,8 @@ services:
       # Overwrite with a real certificate/key for anything beyond local
       # testing — see docs/installation.md's TLS section. Left as a named
       # volume (not a bind mount) so a fresh deployment still works out of
-      # the box: Docker seeds it from the image's baked-in self-signed
-      # placeholder (postfix/Dockerfile) on first start.
+      # the box: postfix/entrypoint.sh generates a self-signed placeholder
+      # unique to this deployment on first start (#173).
       - postfix_tls:/etc/postfix/tls
       # Cyrus SASL's local-SMTP-AUTH credential store (postfix-architecture.md
       # §5) — mounted here, and nowhere in `app`'s own volumes, so this

@@ -19,7 +19,7 @@ class TlsCertificateState(Base):
     __tablename__ = "tls_certificate_state"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # "self_signed" (never issued via ACME yet — the Dockerfile-baked
+    # "self_signed" (never issued via ACME yet — the per-deployment
     # placeholder is assumed live) | "lets_encrypt"
     source: Mapped[str] = mapped_column(nullable=False, default="self_signed")
     domain: Mapped[str | None] = mapped_column(nullable=True, default=None)

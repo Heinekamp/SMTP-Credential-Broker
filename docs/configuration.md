@@ -72,7 +72,7 @@ Postfix's own queue in the meantime.
 ## TLS certificates
 
 The relay ships with a self-signed placeholder certificate on the
-submission port (baked into the `postfix` image at build time) — good
+submission port (generated for each deployment at first start) — good
 enough for local testing, but most real SMTP clients (e.g. PHPMailer-based
 plugins like WP Mail SMTP) reject it during STARTTLS with something like
 "unknown ca" and drop the connection before AUTH, so the mail never even

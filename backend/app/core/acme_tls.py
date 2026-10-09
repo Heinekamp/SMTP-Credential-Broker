@@ -51,7 +51,7 @@ from app.core.settings_store import (
 
 _logger = get_logger("acme_tls")
 
-_RSA_KEY_SIZE = 2048  # matches the Dockerfile-baked placeholder cert's key size
+_RSA_KEY_SIZE = 2048  # matches the per-deployment placeholder cert's key size (postfix/entrypoint.sh)
 _MANUAL_CHALLENGE_TTL = datetime.timedelta(hours=24)
 _MANUAL_CONFIRM_TIMEOUT = 20.0  # seconds — one bounded check per "Verify & Continue" click, not a long block
 

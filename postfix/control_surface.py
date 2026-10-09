@@ -353,7 +353,7 @@ def _restore_tls_files(previous: dict[str, str | None]) -> None:
 
 def _install_tls_certificate(payload: dict) -> dict:
     """Installs a new TLS cert/key pair for smtpd (postfix-architecture.md
-    §2), replacing the Dockerfile-baked self-signed placeholder or a
+    §2), replacing the per-deployment self-signed placeholder or a
     previously-issued Let's Encrypt certificate. This script is
     stdlib-only by design (see module docstring) so validation shells out
     to `openssl` — already a runtime dependency of this image

@@ -88,7 +88,7 @@ local_transport = error:local mail delivery is disabled on this relay
 
 # ── Client-facing (smtpd) TLS ───────────────────────────────────────
 # The two files these paths point at start out as the self-signed
-# placeholder baked into the postfix image at build time (Dockerfile),
+# placeholder generated per deployment at first start (entrypoint.sh, #173),
 # but may also be populated by the `install_tls_certificate` control-
 # surface op (configuration.md's "TLS certificates" section) once an
 # admin enables Let's Encrypt from Settings — main.cf itself never
