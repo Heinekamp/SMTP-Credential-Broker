@@ -10,12 +10,12 @@ around Postfix: the web application, its database, and its secrets.
 
 | Secret | At rest | In transit | Ever shown in UI/API/logs? |
 |---|---|---|---|
-| Upstream SMTP account password | AES-256-GCM ciphertext in `upstream_accounts.encrypted_password` | TLS (admin UI ↔ browser); decrypted only in-process when writing `sasl_passwd` | **Never**, after initial entry. Not returned by any API response, not rendered in any form (edit forms show a "leave blank to keep current password" affordance). |
-| Upstream SMTP password (materialized) | Plaintext inside `/etc/postfix/relay/sasl_passwd(.lmdb)` — required by Postfix's own SASL client, see §3 | Written to a root-owned, `0600` file inside the `postfix` container's private volume | Never logged; excluded from any config export/diagnostic bundle the UI can produce |
+| Upstream SMTP account password | AES-256-GCM ciphertext in `upstream_accounts.encrypted_password` | TLS (admin UI ↔ browser); decrypted only in-process: when writing `sasl_passwd`, and when `app` itself authenticates to the provider (Test Connection, scheduled tests, alert email), over TLS with the provider's certificate verified unless the account opts out | **Never**, after initial entry. Not returned by any API response, not rendered in any form (edit forms show a "leave blank to keep current password" affordance). |
+| Upstream SMTP password (materialized) | Plaintext inside `/etc/postfix/relay/sasl_passwd(.lmdb)` — required by Postfix's own SASL client, see §3 | Written to a root-owned, `0600` file inside the `postfix` container's private volume | Never logged; no API or UI ever reads it back |
 | Local SMTP user password | Argon2id hash stored for the web UI's own bookkeeping (so "has this been changed" can be shown without storing the secret twice); authoritative check happens in `sasldb2` | Shown **once**, at creation/regeneration time, over TLS | Never stored or shown in plaintext after that one-time display |
-| `sasldb2` entries | Berkeley DB, effectively plaintext-equivalent (see §4) | Root-owned, `0640`, `postfix`-group-readable file inside the `postfix` container | Never exposed via API; not readable by the `app` container after write |
+| `sasldb2` entries | Berkeley DB, effectively plaintext-equivalent (see §4) | `/etc/sasldb2`, `root:sasl` `0660`, plus a persisted copy on the `sasldb` volume — both only in the `postfix` container | Never exposed via API; `app` can list usernames but never read a credential back |
 | Admin web session token | SHA-256 hash of the token stored server-side; the token itself only exists in the HttpOnly cookie | TLS | Never logged |
-| `ENCRYPTION_KEY` | Never stored in the database. Supplied via environment variable or Docker secret at container start. | N/A (injected at deploy time) | Never logged, never exposed via API, redacted from any dumped environment in diagnostics |
+| `RELAY_ENCRYPTION_KEY` | Never stored in the database. Supplied via environment variable or a mounted secret file (`RELAY_ENCRYPTION_KEY_FILE`) at container start. | N/A (injected at deploy time) | Never logged, never exposed via API |
 | Cloudflare API token (Let's Encrypt DNS-01) | AES-256-GCM ciphertext in `relay_settings.tls_cloudflare_api_token_encrypted` | TLS (admin UI ↔ browser); decrypted only in-process when calling Cloudflare's API | **Never**, after initial entry — same "leave blank to keep current" affordance as the upstream password field. |
 | Issued TLS certificate's private key, ACME account key | AES-256-GCM ciphertext in `tls_certificate_state.encrypted_key_pem`/`acme_account_key_encrypted` — the database-backed source of truth an app-startup check reconciles the `postfix` container's live files against | Decrypted only in-process when installing/reinstalling the certificate via the control surface | Never returned by any API response. The certificate's private key also exists in cleartext on the `postfix` container's filesystem (`/etc/postfix/tls/relay.key`, root-owned `0600`, §6) the same way the placeholder cert's key always has — encrypting the database copy is what makes it safe to treat as reconstructable/durable, not a claim that the key is secret from that container. |
 | In-progress manual DNS-01 challenge's certificate key, ACME account key | AES-256-GCM ciphertext in `tls_pending_manual_challenge.encrypted_cert_key_pem`/`encrypted_account_key_pem`, alongside the ACME order's own state (not a secret) needed to resume issuance on a later request once the admin confirms the TXT record is live | Decrypted only in-process when finalizing the order | Never returned by any API response. The row (and its keys) is deleted once the challenge is confirmed, expires, or fails unrecoverably. |
@@ -24,9 +24,9 @@ around Postfix: the web application, its database, and its secrets.
 
 - **Algorithm**: AES-256-GCM (authenticated encryption — tampering with
   ciphertext is detected, not just confidentiality-protected).
-- **Key**: a single 256-bit key supplied externally via `ENCRYPTION_KEY`
+- **Key**: a single 256-bit key supplied externally via `RELAY_ENCRYPTION_KEY`
   (base64-encoded in the environment) or a Docker secret file
-  (`ENCRYPTION_KEY_FILE`, preferred for production since it avoids the
+  (`RELAY_ENCRYPTION_KEY_FILE`, preferred for production since it avoids the
   key appearing in `docker inspect` output for env-var-based secrets). The
   key is never written to the database, never logged, and never derived from
   anything stored in the database — losing the database without the key
@@ -34,7 +34,7 @@ around Postfix: the web application, its database, and its secrets.
 - **Nonce**: a fresh random 96-bit nonce per encryption, stored alongside the
   ciphertext (standard GCM practice — nonces are never reused with the same
   key).
-- **Key rotation**: rotating `ENCRYPTION_KEY` requires re-encrypting every
+- **Key rotation**: rotating `RELAY_ENCRYPTION_KEY` requires re-encrypting every
   stored secret: every column whose name contains `encrypted` (upstream
   passwords, admin TOTP secrets, the Cloudflare API token, the TLS
   certificate and ACME account keys, and a pending manual DNS-01
@@ -46,19 +46,25 @@ around Postfix: the web application, its database, and its secrets.
   (and leaving the database untouched) if any value fails to decrypt. This is the *only* supported way to rotate the
   key; there is no "partial" state where some rows use the old key and some
   the new one.
-- **Key loss**: if `ENCRYPTION_KEY` is lost with no backup, every upstream
-  account's password becomes **permanently unrecoverable**. The application
+- **Key loss**: if `RELAY_ENCRYPTION_KEY` is lost with no backup, every
+  encrypted secret becomes **permanently unrecoverable**. The application
   cannot fall back to anything — this is intentional (a recoverable key
-  defeats the purpose of encrypting it at all). Recovery path: mark each
-  upstream account's password as unknown in the UI, re-enter it from the
-  provider's own credential (the provider still has it; only this relay's
-  copy is lost), save, and the relay resumes normal operation. Local SMTP
-  users and their permissions are **unaffected** by encryption-key loss —
-  they're independent secrets stored separately (see §4) — so this is an
-  outage of upstream delivery, not of local SMTP AUTH.
+  defeats the purpose of encrypting it at all). Recovery path: configure a
+  new key, then re-enter each secret from its source, since only this
+  relay's copy is lost:
+  - each upstream account's password (edit the account and enter it again
+    — the provider still has it);
+  - for an admin with TOTP, `relay disable-totp <email>`, then enrol
+    again;
+  - the Cloudflare API token, if Let's Encrypt uses it, then issue the
+    certificate again.
+
+  Local SMTP users and their permissions are **unaffected** by
+  encryption-key loss — they're independent secrets stored separately
+  (see §4) — so this is an outage of upstream delivery, not of local SMTP
+  AUTH.
 - **Backup implication**: the encryption key **must** be backed up
-  separately from the database (see [backup-restore.md](backup-restore.md),
-  produced in a later phase). A database backup without the matching key is
+  separately from the database (see [backup-restore.md](backup-restore.md)). A database backup without the matching key is
   equivalent to a backup with all upstream passwords deleted.
 
 ## 3. Why upstream passwords must exist in plaintext somewhere
@@ -93,7 +99,7 @@ threat model."*
   socket (§6), so it can write the file only through that RPC and can
   never read it back (#159).
 - Compromise of the encrypted database alone (e.g. an exfiltrated SQLite
-  file, without `ENCRYPTION_KEY`) does **not** expose upstream passwords.
+  file, without `RELAY_ENCRYPTION_KEY`) does **not** expose upstream passwords.
 - Compromise of the `postfix` container's filesystem **does** expose
   whichever upstream passwords are currently in use — this is an accepted,
   documented residual risk, not a gap the application is pretending doesn't
@@ -116,11 +122,11 @@ support).
 
 | Aspect | Detail |
 |---|---|
-| Where | `/etc/sasldb2`, inside the `postfix` container only |
-| Permissions | root-owned, `0640`, readable only by the SASL library's runtime group |
+| Where | `/etc/sasldb2`, inside the `postfix` container, plus a copy on the `sasldb` volume (mounted only by `postfix`) that the entrypoint restores it from on every start — Cyrus SASL can't be pointed at a volume path directly (postfix-architecture.md §5) |
+| Permissions | `root:sasl`, `0660`, set by the entrypoint on every start; `smtpd` reads it as the `postfix` user, a member of `sasl` |
 | Written by | `saslpasswd2`, invoked by the application, password piped via stdin (never an argv, never logged; process argv is visible to other processes on the host via `/proc`, stdin is not) |
 | Exposure if `postfix` container is compromised | All local SMTP users' passwords, for that relay instance only. Upstream provider credentials are a separate store (§3) and are not additionally exposed by this. |
-| Exposure if `app`/database is compromised without the encryption key | **None** — local user passwords are never derived from or storable via `ENCRYPTION_KEY`; the app only ever writes to `sasldb2`, it doesn't read from it, and the DB only holds an Argon2id hash used for the web UI's own "was this ever set" bookkeeping. |
+| Exposure if `app`/database is compromised without the encryption key | **None** — local user passwords are never derived from or storable via `RELAY_ENCRYPTION_KEY`; through the control surface `app` can set and delete `sasldb2` entries and list their usernames (the startup reconcile), never read a credential back, and the DB only holds an Argon2id hash used for the web UI's own "was this ever set" bookkeeping. |
 | Considered alternative | Dovecot SASL with a pluggable SQL/passdb backend, which *can* use a proper password hash. Rejected for v1 to avoid a fourth long-running container purely for authentication (see [architecture.md](architecture.md) §4); documented here as the natural next step if this tradeoff becomes unacceptable for a given deployment. |
 
 ## 5. Admin web authentication
@@ -136,7 +142,9 @@ confused.
   system).
 - **Sessions**: server-side session records (`admin_sessions`), referenced by
   an opaque random token in an `HttpOnly`, `Secure`, `SameSite=Strict`
-  cookie. The database stores only a SHA-256 hash of the token (so a DB leak
+  cookie. `Secure` can be switched off with `RELAY_COOKIE_SECURE=false`,
+  which is only meant for a console reached as plain HTTP on a trusted
+  network (configuration.md). The database stores only a SHA-256 hash of the token (so a DB leak
   alone doesn't yield usable session tokens), plus expiry and
   creation metadata (IP/user-agent, for the audit trail — not for
   fingerprinting).
@@ -220,8 +228,11 @@ bogus entry.
 - Application logs are structured (JSON) — `app/core/logging_config.py`'s
   `JsonFormatter`, configured once at app startup — and every admin action
   writes one `audit_log` row (`app/core/audit.py`'s `record_audit`, wired
-  into every mutating route: upstream accounts, senders, local users,
-  permissions, admin accounts, config generation) plus one correlated log
+  into every route that changes state: upstream accounts, senders, local
+  users, permissions, admin accounts, settings, branding, TLS, alerts,
+  config generation, and queue retry/delete; every login attempt, failed
+  or not, is recorded too, by the login rate limiter of §5 — only logout
+  and first-run setup leave no row) plus one correlated log
   line carrying the same request ID (`app/core/request_context.py`, set by
   a middleware in `app/main.py` and echoed back as an `X-Request-ID`
   response header). The structured log line deliberately omits
@@ -229,7 +240,7 @@ bogus entry.
   already the access-controlled place for that context; keeping it out of
   the log stream too is defense in depth, not a missing feature.
 - **Never logged, anywhere, at any log level**: SMTP passwords (local or
-  upstream), `ENCRYPTION_KEY`, session tokens, TOTP secrets, or raw
+  upstream), `RELAY_ENCRYPTION_KEY`, session tokens, TOTP secrets, or raw
   Authorization/cookie headers. `record_audit`'s `detail` parameter is
   documented as plain/already-safe-to-log values only (IDs, names,
   booleans, addresses) — enforced by convention and by
@@ -256,10 +267,10 @@ bogus entry.
 |---|---|
 | Anonymous internet host relays mail through the system | No `permit_mynetworks` in relay restrictions; SASL auth mandatory (postfix-architecture.md §6-8) |
 | Authenticated local user sends as an address they're not permitted | `smtpd_sender_login_maps` + `reject_sender_login_mismatch`, enforced by Postfix itself, not just the web app |
-| Stolen database file (no `ENCRYPTION_KEY`) | Upstream passwords remain encrypted and unusable; local SMTP passwords aren't stored in the DB at all beyond a hash |
-| Stolen `ENCRYPTION_KEY` alone (no DB) | Useless without the ciphertext |
+| Stolen database file (no `RELAY_ENCRYPTION_KEY`) | Upstream passwords remain encrypted and unusable; local SMTP passwords aren't stored in the DB at all beyond a hash |
+| Stolen `RELAY_ENCRYPTION_KEY` alone (no DB) | Useless without the ciphertext |
 | Compromised `postfix` container | Exposes currently-active upstream and local credentials for *this* relay instance — an accepted residual risk inherent to Postfix's own credential-lookup design, not a gap unique to this project (§3, §4) |
-| Compromised `app` container | Can view/change relay configuration and trigger config regeneration via the control surface (§6), but cannot read `sasldb2` or the materialized `sasl_passwd` file back out, and cannot obtain plaintext upstream passwords without also holding `ENCRYPTION_KEY` |
+| Compromised `app` container | Can view/change relay configuration and trigger config regeneration via the control surface (§6), but cannot read `sasldb2` or the materialized `sasl_passwd` file back out, and cannot obtain plaintext upstream passwords without also holding `RELAY_ENCRYPTION_KEY` |
 | Stolen admin session token | Session is server-side revocable (manually via logout, or automatically for every *other* session on the same admin when its password or TOTP changes — the session making the change itself survives); token itself is hashed at rest; `Secure`/`HttpOnly`/`SameSite` cookie flags limit exfiltration paths. |
 | Brute-forced admin login | Rate limiting + lockout + optional TOTP. Lockout window caps at 15 minutes rather than escalating further — see [known-limitations.md](known-limitations.md). |
 

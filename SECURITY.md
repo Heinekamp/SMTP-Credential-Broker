@@ -38,7 +38,7 @@ especially welcome for:
 - authentication, session, CSRF or TOTP bypasses in the admin UI/API
 - abuse of the Postfix control surface or of generated Postfix config
 - exposure of stored secrets (upstream passwords, TOTP secrets, API
-  tokens, TLS keys, `ENCRYPTION_KEY`)
+  tokens, TLS keys, `RELAY_ENCRYPTION_KEY`)
 
 Problems caused only by a deployment choice the docs already warn against,
 such as exposing the admin UI beyond a trusted network without a TLS

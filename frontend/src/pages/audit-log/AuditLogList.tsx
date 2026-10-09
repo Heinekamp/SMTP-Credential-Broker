@@ -14,6 +14,7 @@ const TARGET_TYPES = [
   "alert",
   "config_generation",
   "local_smtp_user",
+  "queue_message",
   "relay_settings",
   "sender",
   "upstream_account",
