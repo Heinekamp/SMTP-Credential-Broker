@@ -95,7 +95,10 @@ docker compose run --rm app relay generate-encryption-key   # paste the output i
 docker compose up -d --build
 ```
 
-Then open `http://<host>:8000/` to create the first admin account. See
+Then open the console to create the first admin account. Behind an HTTPS
+reverse proxy that's just its URL. To use plain `http://<host>:8000/` on a
+trusted LAN instead, first set `RELAY_COOKIE_SECURE=false` in `.env`,
+otherwise the browser won't keep you logged in. See
 [docs/installation.md](docs/installation.md) for the full walkthrough
 (TLS, exposed ports, first-run setup).
 

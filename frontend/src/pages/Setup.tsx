@@ -6,7 +6,7 @@ import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
 import { MIN_ADMIN_PASSWORD_LENGTH } from "../lib/api/admins";
 import { submitSetup } from "../lib/api/setup";
-import { SESSION_QUERY_KEY } from "../lib/useSession";
+import { confirmSessionEstablished, sessionCookieRejectedMessage } from "../lib/useSession";
 
 // Design handoff screen 2 — same centered-card shell as Login, first-run
 // only. Hands off straight into the Dashboard's guided-empty state on
@@ -36,12 +36,22 @@ export function Setup() {
     setSubmitting(true);
     try {
       await submitSetup(email, password);
-      // See Login.tsx's submit() for why this must be refetchQueries, not
-      // invalidateQueries, before navigating.
-      await queryClient.refetchQueries({ queryKey: SESSION_QUERY_KEY });
-      navigate("/", { replace: true });
     } catch {
       setError("Could not create the admin account.");
+      setSubmitting(false);
+      return;
+    }
+    try {
+      // See Login.tsx's submit() for why the session must be fetched, not
+      // just invalidated, before navigating.
+      if (!(await confirmSessionEstablished(queryClient))) {
+        // The account exists now; only the cookie is missing (#212).
+        setError(`Admin account created, but you aren't logged in. ${sessionCookieRejectedMessage()}`);
+        return;
+      }
+      navigate("/", { replace: true });
+    } catch {
+      setError("Admin account created, but the session couldn't be checked. Reload the page to log in.");
     } finally {
       setSubmitting(false);
     }

@@ -81,8 +81,8 @@ Once installed, verify you have the right version of Docker Compose:
 docker compose version
 ```
 
-This must print a version starting with `v2` (e.g. `Docker Compose
-version v2.24.0`). This project uses the modern `docker compose`
+This must print version `v2.24.0` or newer (e.g. `Docker Compose
+version v2.29.1`). This project uses the modern `docker compose`
 subcommand (with a **space**), which comes bundled with current Docker
 installs — not the old standalone `docker-compose` program (with a
 **hyphen**), which is a different, older tool. If `docker compose`
@@ -173,6 +173,13 @@ from those services. Two options:
   re-creating existing local users' credentials, since they're tied to
   this value at creation time.
 
+**Set `RELAY_COOKIE_SECURE=false`** if you'll open the web console as
+plain `http://...:8000` on your own network, which is what this guide does
+in step 6. By default the app sends HTTPS-only login cookies, and a
+browser throws those away on a plain-HTTP page, so you'd log in and land
+straight back on the login screen. Leave it at `true` only if you'll put
+an HTTPS reverse proxy in front of the console.
+
 Everything else in `.env` can stay at its default for a first install.
 If port 8000 is already used by something else on your server, uncomment
 and change the `APP_HOST_PORT` line — otherwise skip it.
@@ -210,7 +217,9 @@ few seconds.
 
 Open `http://<your-server's-address>:8000/` in a browser (e.g.
 `http://192.168.1.50:8000/` — use whatever address your server has on
-your network). A brand-new install has no admin account yet, so you'll
+your network). If the login screen says your browser didn't keep the
+session cookie, you skipped `RELAY_COOKIE_SECURE=false` in step 4: set
+it, run `docker compose up -d`, and log in again. A brand-new install has no admin account yet, so you'll
 land straight on **Create the first admin account**. Fill in an email
 and a strong password. (This screen only ever appears once — after the
 first admin exists, this same address takes you to the ordinary login

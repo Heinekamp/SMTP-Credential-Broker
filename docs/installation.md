@@ -4,8 +4,8 @@ New to this? See [Getting Started](getting-started.md) for a fuller
 walkthrough with explanations of each step. This page is the terse
 reference version, for anyone already comfortable with Docker.
 
-Requires Docker and Docker Compose (v2, the `docker compose` subcommand —
-not the standalone `docker-compose` v1 binary). No other host dependencies;
+Requires Docker and Docker Compose v2.24 or newer (the `docker compose`
+subcommand — not the standalone `docker-compose` v1 binary). No other host dependencies;
 Postfix, Python, and the SPA all run inside the two containers this stack
 builds.
 
@@ -31,7 +31,20 @@ Paste the printed value into `.env` as `RELAY_ENCRYPTION_KEY`. Set
 internal services will actually use to reach this relay (it doesn't need
 to be publicly resolvable — it's the identity Postfix presents on its own
 submission port, and the Cyrus SASL realm local credentials are issued
-under). See [configuration.md](configuration.md) for every other setting.
+under). See [configuration.md](configuration.md) for every other setting;
+the `app` container loads all of `.env`.
+
+**Decide how you'll reach the web console.** It serves plain HTTP on port
+8000 and sends `Secure` (HTTPS-only) session cookies by default
+(`RELAY_COOKIE_SECURE=true`):
+
+- **Behind an HTTPS reverse proxy** (recommended for anything beyond a
+  trusted internal network): keep the default.
+- **Directly as `http://<host>:8000/` on a trusted LAN**: set
+  `RELAY_COOKIE_SECURE=false` in `.env`. A browser won't keep a `Secure`
+  cookie on a plain-HTTP page (only `localhost` is exempt), so with the
+  default you'd sign in and land straight back on the login page. The
+  login screen says so if it happens.
 
 ## 2. Build and start
 
@@ -53,7 +66,8 @@ boot is expected, not a fault.
 
 ## 3. First-run setup
 
-Open `http://<host>:8000/` in a browser. A fresh install has no admin
+Open the console in a browser — your HTTPS proxy's URL, or
+`http://<host>:8000/` if you set `RELAY_COOKIE_SECURE=false` above. A fresh install has no admin
 account yet, so you'll land on **Create the first admin account**
 automatically. This is the only time this screen is reachable — once one
 admin exists, the same URL redirects to the ordinary login screen instead
