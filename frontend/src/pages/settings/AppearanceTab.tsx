@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, TextInput } from "../../design-system/components";
@@ -23,7 +23,8 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 // other global Settings tabs.
 export function AppearanceTab() {
   const queryClient = useQueryClient();
-  const { data: branding } = useQuery({ queryKey: ["branding"], queryFn: fetchBranding });
+  const { data: branding, dataUpdatedAt: brandingUpdatedAt } = useQuery({ queryKey: ["branding"], queryFn: fetchBranding });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [saved, setSaved] = useState(false);
@@ -152,7 +153,7 @@ export function AppearanceTab() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
           <img
-            src={branding?.has_custom_logo ? "/api/branding/logo" : "/logo.png"}
+            src={branding?.has_custom_logo ? `/api/branding/logo?v=${brandingUpdatedAt}` : "/logo.png"}
             alt=""
             style={{
               height: 48,
@@ -169,21 +170,25 @@ export function AppearanceTab() {
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/svg+xml"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) upload.mutate(file);
-                e.target.value = "";
-              }}
-            />
-            <Button variant="default" disabled={upload.isPending}>
-              {upload.isPending ? "Uploading…" : "Upload Logo"}
-            </Button>
-          </label>
+          {/* A real button that opens the hidden input — a button nested in a
+              <label> doesn't reliably activate the label's control, and the
+              hidden input was unreachable by keyboard (#209). */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml"
+            style={{ display: "none" }}
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) upload.mutate(file);
+              e.target.value = "";
+            }}
+          />
+          <Button variant="default" disabled={upload.isPending} onClick={() => fileInputRef.current?.click()}>
+            {upload.isPending ? "Uploading…" : "Upload Logo"}
+          </Button>
           {branding?.has_custom_logo && (
             <Button variant="warn" onClick={() => remove.mutate()} disabled={remove.isPending}>
               {remove.isPending ? "Removing…" : "Remove"}

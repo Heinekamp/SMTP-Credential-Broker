@@ -21,6 +21,12 @@ const INTERVAL_OPTIONS: { label: string; value: string }[] = [
   { label: "Every 24 hours", value: "1440" },
 ];
 
+/** The presets, plus the stored value if it isn't one of them — otherwise the
+ * select silently *displays* the first option (#209). */
+function withStoredValue(options: { label: string; value: string }[], value: string, label: string) {
+  return options.some((opt) => opt.value === value) ? options : [...options, { label, value }];
+}
+
 const fieldLabelStyle = {
   fontSize: "var(--text-2xs)",
   color: "var(--text-muted)",
@@ -127,7 +133,7 @@ export function NotificationsTab() {
         </p>
         <div style={fieldLabelStyle}>Interval</div>
         <Select value={interval} onChange={(e) => setInterval(e.target.value)} style={{ width: "100%" }}>
-          {INTERVAL_OPTIONS.map((opt) => (
+          {withStoredValue(INTERVAL_OPTIONS, interval, `Every ${interval} minutes`).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

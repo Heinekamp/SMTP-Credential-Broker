@@ -10,7 +10,15 @@ import { fetchBranding } from "../lib/api/branding";
 // clearing both when no custom color is set falls back to the fixed
 // brand green automatically.
 export function BrandingEffects() {
-  const { data } = useQuery({ queryKey: ["branding"], queryFn: fetchBranding });
+  const { data, dataUpdatedAt } = useQuery({ queryKey: ["branding"], queryFn: fetchBranding });
+
+  // Same cache problem as BrandLogo's <img> (#209) — point the favicon at
+  // a URL that changes whenever branding does.
+  useEffect(() => {
+    if (!dataUpdatedAt) return;
+    const icon = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (icon) icon.href = `/api/branding/favicon?v=${dataUpdatedAt}`;
+  }, [dataUpdatedAt]);
 
   useEffect(() => {
     const root = document.documentElement.style;

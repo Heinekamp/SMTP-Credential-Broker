@@ -10,6 +10,12 @@ import { fetchHealth } from "../../lib/api/health";
 import { fetchNotificationSettings, updateNotificationSettings } from "../../lib/api/notificationSettings";
 import { fetchSystemStatus } from "../../lib/api/system";
 
+/** The presets, plus the stored value if it isn't one of them — otherwise the
+ * select silently *displays* "Keep forever" (#209). */
+function withStoredValue(options: { label: string; value: string }[], value: string) {
+  return options.some((opt) => opt.value === value) ? options : [...options, { label: `${value} days`, value }];
+}
+
 const RETENTION_OPTIONS: { label: string; value: string }[] = [
   { label: "Keep forever", value: "" },
   { label: "30 days", value: "30" },
@@ -160,7 +166,7 @@ export function SystemTab() {
           onChange={(e) => setMailLogRetention(e.target.value)}
           style={{ width: "100%", marginBottom: 12 }}
         >
-          {RETENTION_OPTIONS.map((opt) => (
+          {withStoredValue(RETENTION_OPTIONS, mailLogRetention).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -172,7 +178,7 @@ export function SystemTab() {
           onChange={(e) => setAuditLogRetention(e.target.value)}
           style={{ width: "100%", marginBottom: 16 }}
         >
-          {RETENTION_OPTIONS.map((opt) => (
+          {withStoredValue(RETENTION_OPTIONS, auditLogRetention).map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
