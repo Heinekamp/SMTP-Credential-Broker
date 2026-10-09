@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# No job needs to write anything back to the repo, so give GITHUB_TOKEN read-only
+# access instead of the account-default scopes.
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
