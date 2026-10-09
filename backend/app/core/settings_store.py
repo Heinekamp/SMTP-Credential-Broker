@@ -1,37 +1,45 @@
-"""Get-or-create-row-1 helpers for the singleton settings tables,
-matching mail_log_ingest.py's `_get_state` pattern."""
+"""Get-or-create-row-1 helpers for the singleton settings tables."""
 
+from sqlalchemy import insert
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 
+from app.db.base import Base
 from app.models.settings import BackgroundJobState, RelaySettings
 from app.models.tls import TlsCertificateState, TlsPendingManualChallenge
 
 
+def get_or_create_singleton[T: Base](db: Session, model: type[T], **defaults: object) -> T:
+    """Row 1 of a singleton table, created on first use. Created with
+    INSERT … ON CONFLICT DO NOTHING rather than add()+flush(): background
+    ticks run in their own threads and sessions, and two of them reaching
+    this on a fresh database both used to insert — the loser failing with
+    "UNIQUE constraint failed" (#193). Column defaults declared on the
+    model apply to the Core insert as well."""
+    row = db.get(model, 1)
+    if row is not None:
+        return row
+    dialect = db.get_bind().dialect.name
+    values = {"id": 1, **defaults}
+    if dialect == "sqlite":
+        db.execute(sqlite.insert(model).values(**values).on_conflict_do_nothing(index_elements=["id"]))
+    elif dialect == "postgresql":
+        db.execute(postgresql.insert(model).values(**values).on_conflict_do_nothing(index_elements=["id"]))
+    else:  # no portable upsert — at least as good as before
+        db.execute(insert(model).values(**values))
+    return db.get(model, 1)
+
+
 def get_relay_settings(db: Session) -> RelaySettings:
-    settings_row = db.get(RelaySettings, 1)
-    if settings_row is None:
-        settings_row = RelaySettings(id=1)
-        db.add(settings_row)
-        db.flush()
-    return settings_row
+    return get_or_create_singleton(db, RelaySettings)
 
 
 def get_background_job_state(db: Session) -> BackgroundJobState:
-    state = db.get(BackgroundJobState, 1)
-    if state is None:
-        state = BackgroundJobState(id=1)
-        db.add(state)
-        db.flush()
-    return state
+    return get_or_create_singleton(db, BackgroundJobState)
 
 
 def get_tls_certificate_state(db: Session) -> TlsCertificateState:
-    state = db.get(TlsCertificateState, 1)
-    if state is None:
-        state = TlsCertificateState(id=1)
-        db.add(state)
-        db.flush()
-    return state
+    return get_or_create_singleton(db, TlsCertificateState)
 
 
 def get_tls_pending_manual_challenge(db: Session) -> TlsPendingManualChallenge | None:

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core import mail_log_parser as parser
 from app.core.logging_config import get_logger
 from app.core.postfix_control import tail_maillog
+from app.core.settings_store import get_or_create_singleton
 from app.models.enums import MailStatus
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
@@ -42,12 +43,7 @@ _ingest_lock = threading.Lock()
 
 
 def _get_state(db: Session) -> MailLogIngestState:
-    state = db.get(MailLogIngestState, 1)
-    if state is None:
-        state = MailLogIngestState(id=1, byte_offset=0)
-        db.add(state)
-        db.flush()
-    return state
+    return get_or_create_singleton(db, MailLogIngestState, byte_offset=0)
 
 
 def _get_or_create(db: Session, queue_id: str, event: parser.LogEvent) -> MailLog:
