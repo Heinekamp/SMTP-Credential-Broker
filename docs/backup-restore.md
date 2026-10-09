@@ -1,6 +1,6 @@
 # Backup and Restore
 
-Two things must be backed up, separately, for a restore to work at all:
+Three things must be backed up for a restore to work completely:
 
 1. **The database** (`app_data` volume — `app.db` and its WAL/SHM
    siblings under SQLite's default settings).
@@ -12,12 +12,19 @@ Two things must be backed up, separately, for a restore to work at all:
    separate from the database backup itself (a password manager, a
    sealed secret store, printed and locked in a drawer — anywhere that
    doesn't get deleted in the same incident that takes out the database).
+3. **The local SMTP credentials** (`sasldb` volume — `sasldb2`). The
+   database only keeps a one-way hash of each local user's password; the
+   credential Postfix actually checks at `AUTH` time lives only here
+   (postfix-architecture.md §5). It can't be rebuilt from the database.
+   Without it, every local user has to get a new password
+   (**Regenerate** on the Local SMTP Users screen) and every service
+   using one has to be reconfigured with it.
 
-This procedure has been tested end-to-end against a real simulated
-disaster (deleting the `app_data` volume outright and restoring from a
-backup taken minutes earlier), including verifying that restored data
-matches byte-for-byte and that the backed-up key correctly decrypts the
-restored secrets.
+The database part of this procedure has been tested end-to-end against a
+real simulated disaster (deleting the `app_data` volume outright and
+restoring from a backup taken minutes earlier), including verifying that
+restored data matches byte-for-byte and that the backed-up key correctly
+decrypts the restored secrets.
 
 ## Backing up
 
@@ -39,6 +46,17 @@ docker compose cp app:/data/backup.db ./backups/app-$(date +%Y%m%d-%H%M%S).db
 docker compose exec app rm /data/backup.db
 ```
 
+Then the local SMTP credentials, at the same time so the two match:
+
+```bash
+docker compose cp postfix:/var/lib/postfix-sasldb/sasldb2 ./backups/sasldb2-$(date +%Y%m%d-%H%M%S)
+docker compose exec postfix sasldblistusers2 -f /var/lib/postfix-sasldb/sasldb2   # lists every local user
+```
+
+That file is only rewritten when a local user is created, deleted,
+disabled, re-enabled or gets a new password, so a plain copy is safe as
+long as nobody is doing one of those at that moment.
+
 Run this on whatever schedule matches your actual tolerance for lost
 data (cron, a systemd timer, your orchestrator's own backup hooks — this
 project doesn't prescribe one). Confirm at the same time that your
@@ -53,26 +71,37 @@ one, not a stale copy from before the rotation.
    ```bash
    docker compose down
    ```
-2. Restore the database file into the (still-existing, or recreated)
-   `app_data` volume:
+2. Restore the database file into the `app_data` volume. `docker compose
+   run` mounts the service's own volumes (creating them if they're gone),
+   so there's no volume name to look up:
    ```bash
-   docker compose up -d app_data_placeholder 2>/dev/null || true
-   docker run --rm -v smtp-credential-broker_app_data:/data -v "$(pwd)/backups":/backups \
-     alpine cp /backups/app-20260101-020000.db /data/app.db
+   docker compose run --rm --no-deps -v "$(pwd)/backups:/backups" --entrypoint sh app \
+     -c 'rm -f /data/app.db-wal /data/app.db-shm && cp /backups/app-20260101-020000.db /data/app.db'
    ```
-   (Adjust the volume name to match `docker volume ls` on your host —
-   Compose prefixes it with the project/directory name.) If `app.db-wal`
-   or `app.db-shm` files exist alongside the live database at backup
-   time, they are not part of this backup and don't need to be restored
-   — the online backup API already folds any in-flight WAL content into
-   the single `backup.db` file it produces.
-3. Confirm `RELAY_ENCRYPTION_KEY` (or `RELAY_ENCRYPTION_KEY_FILE`) is set
+   The `rm` matters when restoring over a database that still exists:
+   leftover `app.db-wal`/`app.db-shm` files from the old database must
+   not be replayed onto the restored one. The backup itself is a single
+   file — the online backup API already folds any in-flight WAL content
+   into it.
+3. Restore the local SMTP credentials into the `sasldb` volume, from the
+   copy taken alongside that database backup:
+   ```bash
+   docker compose run --rm --no-deps -v "$(pwd)/backups:/backups" --entrypoint cp postfix \
+     /backups/sasldb2-20260101-020000 /var/lib/postfix-sasldb/sasldb2
+   ```
+   `postfix` installs it as its live credential store on its next start.
+   If the copy is newer or older than the database backup, the two are
+   reconciled at startup only in one direction: any credential with no
+   enabled local user in the database behind it is removed, but a local
+   user whose credential is missing stays unable to log in until you
+   **Regenerate** its password.
+4. Confirm `RELAY_ENCRYPTION_KEY` (or `RELAY_ENCRYPTION_KEY_FILE`) is set
    to the key that was current when this backup was taken — restoring the
    database with the wrong key doesn't fail loudly at startup; it fails
    the first time something tries to decrypt a secret (surfaced as a 503
    with "invalid encryption key" — see
    [troubleshooting.md](troubleshooting.md)).
-4. Start the stack back up:
+5. Start the stack back up:
    ```bash
    docker compose up -d
    ```
@@ -80,12 +109,12 @@ one, not a stale copy from before the rotation.
    and regenerates the Postfix config on boot, so an immediate
    connection attempt can see a brief empty reply before it's ready
    (`docker compose logs -f app` to watch it settle).
-5. Verify: log in, confirm the upstream accounts/senders/local users you
+6. Verify: log in, confirm the upstream accounts/senders/local users you
    expect are present, and use an existing local SMTP user's credentials
    to send a real test message end-to-end. A successful send is the only
-   real proof the restored encryption key actually matches the restored
-   ciphertext — the UI alone won't tell you a decrypt is silently
-   failing until something tries to use the secret.
+   real proof that both the encryption key matches the restored
+   ciphertext and the restored `sasldb2` holds that user's credential —
+   the UI alone shows neither.
 
 ## What's not covered by this procedure
 
