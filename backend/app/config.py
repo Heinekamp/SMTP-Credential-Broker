@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # `check_policy_service = inet:app:{port}` over the Compose network,
     # never published to the host.
     policy_service_port: int = 10030
+    # The only client the policy service answers, besides loopback — the
+    # `postfix` Compose service by default. The listener trusts the
+    # sasl_username it's told, so nothing else on a shared Docker network
+    # may talk to it (#167). Resolved per connection; set it to Postfix's
+    # hostname if the service is named differently.
+    policy_service_allowed_client: str | None = "postfix"
 
     # CA bundle that upstream SMTP servers' certificates are verified
     # against, by both Postfix (main.cf's smtp_tls_CAfile) and the app's own

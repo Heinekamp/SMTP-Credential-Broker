@@ -343,6 +343,32 @@ def test_upstream_certificate_check_can_be_skipped_per_account(api: httpx.Client
     assert _wait_for_delivery(lambda d: d["mail_from"] == address) is not None
 
 
+def test_local_user_rate_limit_is_enforced_by_the_policy_service(api: httpx.Client, stub: None, uid: str) -> None:
+    """End-to-end proof that Postfix reaches the policy service and gets
+    answers (#167). Since Postfix now fails *open* when it can't reach the
+    listener, a broken connection — e.g. the peer check wrongly refusing
+    the postfix container — would otherwise go unnoticed: mail would just
+    keep flowing unlimited. A 1/hour user's second message must be deferred."""
+    address = f"ratelimited-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="Rate limit test", username="noreply@example.com", password="noreply-upstream-pass"
+    )
+    sender_id = create_sender(api, address=address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Rate Limited", username=f"ratelimited-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    api.patch(f"/api/local-users/{user_id}", json={"rate_limit_per_hour": 1}).raise_for_status()
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"ratelimited-{uid}", password)
+    client.sendmail(address, ["dest@example.net"], "Subject: first\n\nb")
+    with pytest.raises(smtplib.SMTPDataError) as excinfo:
+        client.sendmail(address, ["dest@example.net"], "Subject: second\n\nb")
+    client.quit()
+    assert 400 <= excinfo.value.smtp_code < 500, excinfo.value
+    assert b"rate limit" in excinfo.value.smtp_error
+
+
 def test_open_relay_is_prevented_without_authentication(api: httpx.Client) -> None:
     # Deliberately the submission port (587), not plain smtp (25): port 25
     # is bound loopback-only by design (postfix-architecture.md §3) and

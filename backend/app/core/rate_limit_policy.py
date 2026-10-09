@@ -190,32 +190,88 @@ def _parse_attributes(lines: list[bytes]) -> dict[str, str]:
     return attrs
 
 
-async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+# A real smtpd policy request is a couple of dozen short attribute lines
+# (SMTPD_POLICY_README); anything far beyond that isn't Postfix (#167).
+_MAX_ATTRIBUTE_LINES = 100
+_MAX_LINE_BYTES = 2048
+
+# evaluate() reads and writes counters with no locking of its own; running
+# it in a worker thread (so a SQLite lock can't stall the event loop) must
+# not let two evaluations interleave.
+_evaluate_lock = asyncio.Lock()
+
+
+def _evaluate_in_new_session(attrs: dict[str, str]) -> str:
+    db = SessionLocal()
+    try:
+        return evaluate(db, attrs)
+    finally:
+        db.close()
+
+
+async def _peer_is_allowed(peer_host: str, allowed_host: str | None) -> bool:
+    """Only Postfix itself may ask (#167): this listener believes whatever
+    sasl_username it's told, so any other client on a shared network could
+    otherwise burn through a user's budget and get them auto-disabled. The
+    allowed name is resolved per connection (Postfix keeps its connection
+    open, so this is rare) — container IPs change on recreation. A failed
+    lookup refuses the connection; Postfix then falls back to
+    smtpd_policy_service_default_action (DUNNO), so mail keeps flowing."""
+    if peer_host in ("127.0.0.1", "::1"):
+        return True
+    if allowed_host is None:
+        return True
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(allowed_host, None)
+    except OSError:
+        return False
+    return peer_host in {info[4][0] for info in infos}
+
+
+async def _read_request(reader: asyncio.StreamReader) -> list[bytes] | None:
+    """One request's attribute lines, or None if the client closed the
+    connection or sent something no Postfix request looks like."""
+    lines: list[bytes] = []
+    while True:
+        try:
+            line = await reader.readuntil(b"\n")
+        except asyncio.IncompleteReadError:
+            return None  # client closed the connection
+        except asyncio.LimitOverrunError:
+            return None  # one line longer than the stream limit
+        line = line.rstrip(b"\r\n")
+        if not line:
+            return lines  # blank line: end of this request's attributes
+        if len(line) > _MAX_LINE_BYTES or len(lines) >= _MAX_ATTRIBUTE_LINES:
+            return None
+        lines.append(line)
+
+
+async def _handle_connection(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *, allowed_host: str | None
+) -> None:
     """Postfix keeps one policy connection open across many requests —
     loop until it closes rather than handling a single request per
     connection."""
     try:
+        peer = writer.get_extra_info("peername")
+        peer_host = peer[0] if peer else ""
+        if not await _peer_is_allowed(peer_host, allowed_host):
+            _logger.warning("refused rate-limit policy connection from %s — not the postfix service", peer_host)
+            return
         while True:
-            lines: list[bytes] = []
-            while True:
-                line = await reader.readline()
-                if not line:
-                    return  # client closed the connection
-                line = line.rstrip(b"\r\n")
-                if not line:
-                    break  # blank line: end of this request's attributes
-                lines.append(line)
+            lines = await _read_request(reader)
+            if lines is None:
+                return
 
             attrs = _parse_attributes(lines)
-            db = SessionLocal()
             try:
-                response = evaluate(db, attrs)
+                async with _evaluate_lock:
+                    response = await asyncio.to_thread(_evaluate_in_new_session, attrs)
             except Exception:
                 # A bug here must never become a mail outage — fail open.
                 _logger.exception("rate-limit policy evaluation failed — permitting the message")
                 response = _DUNNO
-            finally:
-                db.close()
 
             writer.write(response.encode("utf-8"))
             await writer.drain()
@@ -223,9 +279,15 @@ async def _handle_connection(reader: asyncio.StreamReader, writer: asyncio.Strea
         writer.close()
 
 
-async def run_policy_service(port: int) -> None:
+async def run_policy_service(port: int, *, allowed_host: str | None = "postfix", host: str = "0.0.0.0") -> None:
     """Runs until cancelled — main.py registers this as a long-lived task
-    alongside the periodic background ticks."""
-    server = await asyncio.start_server(_handle_connection, host="0.0.0.0", port=port)
+    alongside the periodic background ticks. Still binds every interface
+    (Postfix reaches it across the Compose network as inet:app:{port}),
+    but only answers the `allowed_host` service; see _peer_is_allowed."""
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await _handle_connection(reader, writer, allowed_host=allowed_host)
+
+    server = await asyncio.start_server(handler, host=host, port=port, limit=_MAX_LINE_BYTES * 2)
     async with server:
         await server.serve_forever()

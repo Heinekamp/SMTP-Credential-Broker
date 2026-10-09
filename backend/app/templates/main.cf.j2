@@ -66,6 +66,14 @@ smtpd_helo_required = yes
 # core/rate_limit_policy.py runs this inside the `app` container itself.
 smtpd_end_of_data_restrictions =
     check_policy_service inet:app:{{ policy_service_port }}
+# Fail open when the policy service can't be reached at all — `app` down,
+# restarting or crash-looping. Postfix's own default is to wait 100s and
+# then tempfail *every* message ("451 4.3.5 Server configuration
+# problem"), turning a rate-limiter outage into a mail outage
+# (security-model.md §10, #167). Rate limiting is abuse mitigation, not an
+# authorization boundary — sender authorization above is unaffected.
+smtpd_policy_service_default_action = DUNNO
+smtpd_policy_service_timeout = 10s
 
 # ── Upstream (smtp client) TLS ──────────────────────────────────────
 # `secure` = TLS is mandatory AND the upstream's certificate must chain to
