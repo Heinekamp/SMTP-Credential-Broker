@@ -85,6 +85,16 @@ def _log_mail(
     db.commit()
 
 
+def _same_as_last_alert_failure(db: Session, *, sender: Sender, error: str) -> bool:
+    last = (
+        db.query(MailLog)
+        .filter(MailLog.queue_id.like("ALERT-%"), MailLog.envelope_sender == sender.address)
+        .order_by(MailLog.timestamp.desc(), MailLog.id.desc())
+        .first()
+    )
+    return last is not None and last.status == MailStatus.deferred and last.error == error
+
+
 def _send(
     db: Session, sender: Sender, recipients: list[str], subject: str, body: str, from_name: str | None
 ) -> tuple[bool, str]:
@@ -110,7 +120,10 @@ def _send(
         # for "failed just now, will retry automatically" (none of the
         # enum's values were designed with this non-Postfix path in mind).
         _logger.warning("alert email send failed", exc_info=True)
-        _log_mail(db, sender=sender, recipients=recipients, status=MailStatus.deferred, error=str(exc))
+        # Retried every tick until it works — but one mail_log row per
+        # distinct failure, not one per minute for as long as it lasts (#195).
+        if not _same_as_last_alert_failure(db, sender=sender, error=str(exc)):
+            _log_mail(db, sender=sender, recipients=recipients, status=MailStatus.deferred, error=str(exc))
         return False, str(exc)
 
 

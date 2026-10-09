@@ -124,17 +124,20 @@ class LogEvent:
 def _parse_timestamp(line: str) -> datetime.datetime:
     # Postfix's own log lines (whether via syslog or maillog_file) carry no
     # year — "Jun 10 12:34:56" — so one is assumed from the current date.
-    # This means a line from Dec 31 parsed just after a new year rolls
-    # over would be misdated by a year; an accepted, cosmetic limitation of
-    # this timestamp format shared by every traditional syslog-line parser,
-    # not something this project's data model depends on for correctness.
+    # A line can't be from the future, so one that lands more than a day
+    # ahead (clock skew allowance) is last year's: a Dec 31 line ingested
+    # on Jan 1 used to be dated almost a year ahead, outliving retention
+    # and inflating the upstream "sent this hour" count (#195).
     now = datetime.datetime.now(tz=datetime.UTC)
     prefix = line[:15]
     try:
-        parsed = datetime.datetime.strptime(prefix, "%b %d %H:%M:%S")
+        parsed = datetime.datetime.strptime(f"{now.year} {prefix}", "%Y %b %d %H:%M:%S")
     except ValueError:
         return now
-    return parsed.replace(year=now.year, tzinfo=datetime.UTC)
+    parsed = parsed.replace(tzinfo=datetime.UTC)
+    if parsed - now > datetime.timedelta(days=1):
+        parsed = parsed.replace(year=now.year - 1)
+    return parsed
 
 
 def parse_line(line: str) -> LogEvent | None:

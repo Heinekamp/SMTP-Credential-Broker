@@ -765,3 +765,54 @@ def test_a_successful_apply_activates_every_map_with_sender_login_last(
     assert len(built) == 6
     assert built[-1] == "sender_login"
     assert [p.name for p in map_dir.iterdir() if p.name.startswith(".staging-")] == []
+
+
+def test_tail_maillog_consumes_only_complete_lines(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Regression test for #195: the new offset was a size taken before
+    reading, so lines appended mid-read were returned twice; a half-written
+    last line also came back cut off."""
+    maillog = tmp_path / "maillog"
+    maillog.write_bytes(b"first\nsecond\nhalf-writt")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+
+    result = control_surface._tail_maillog({"since_offset": 0, "since_inode": None})
+    assert result["lines"] == ["first", "second"]
+    assert result["new_offset"] == len(b"first\nsecond\n")
+
+    with open(maillog, "ab") as f:
+        f.write(b"en line\n")
+    following = control_surface._tail_maillog({"since_offset": result["new_offset"], "since_inode": result["inode"]})
+    assert following["lines"] == ["half-written line"]
+
+
+def test_tail_maillog_returns_a_large_backlog_in_bounded_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    maillog = tmp_path / "maillog"
+    maillog.write_bytes(b"".join(b"line %04d\n" % i for i in range(100)))
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+    monkeypatch.setattr(control_surface, "_MAILLOG_MAX_READ_BYTES", 100)
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: pytest.fail("must not rotate"))
+
+    lines, offset, inode = [], 0, None
+    for _ in range(20):
+        result = control_surface._tail_maillog({"since_offset": offset, "since_inode": inode})
+        lines += result["lines"]
+        offset, inode = result["new_offset"], result["inode"]
+    assert lines == [f"line {i:04d}" for i in range(100)]
+
+
+def test_a_large_fully_ingested_maillog_is_rotated_keeping_one_copy(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    maillog = tmp_path / "maillog"
+    maillog.write_bytes(b"x" * 50 + b"\n")
+    for old in ("maillog.20260101-000000.gz", "maillog.20260201-000000.gz"):
+        (tmp_path / old).write_bytes(b"old")
+    monkeypatch.setattr(control_surface, "MAILLOG_PATH", str(maillog))
+    monkeypatch.setattr(control_surface, "_MAILLOG_ROTATE_BYTES", 10)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(control_surface, "_run", lambda args, **k: calls.append(args) or _completed(0))
+
+    control_surface._tail_maillog({"since_offset": 0, "since_inode": None})
+
+    assert calls == [["postfix", "logrotate"]]
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("maillog.")) == [
+        "maillog.20260201-000000.gz"
+    ]

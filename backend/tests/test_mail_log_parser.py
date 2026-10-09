@@ -236,3 +236,17 @@ def test_lost_connection_after_auth_is_parsed_as_a_rejection() -> None:
     assert event is not None
     assert event.kind == "reject"
     assert "AUTH" in event.error
+
+
+def test_a_december_line_read_in_january_is_dated_last_year() -> None:
+    """Regression test for #195: the current year was assumed, putting a
+    Dec 31 line ingested on Jan 1 almost a year in the future."""
+    import datetime
+
+    import time_machine
+
+    from app.core.mail_log_parser import _parse_timestamp
+
+    with time_machine.travel(datetime.datetime(2027, 1, 1, 0, 5, tzinfo=datetime.UTC)):
+        assert _parse_timestamp("Dec 31 23:59:58 relay postfix/smtp[1]: x").year == 2026
+        assert _parse_timestamp("Jan  1 00:04:00 relay postfix/smtp[1]: x").year == 2027

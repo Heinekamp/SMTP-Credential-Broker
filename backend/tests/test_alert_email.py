@@ -333,3 +333,29 @@ def test_from_name_is_passed_through_to_send_alert_email(monkeypatch: pytest.Mon
     _run()
 
     assert sent[0]["from_name"] == "SMTP Relay Alerts"
+
+
+def test_a_persisting_send_failure_logs_one_row_not_one_per_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for #195: the tick retries every minute (correctly),
+    but each attempt used to add another deferred row to the Mail Log."""
+    db = SessionLocal()
+    sender = _configured_sender(db)
+    _configure(db, sender_id=sender.id)
+    db.close()
+    errors = iter(["smtp unreachable", "smtp unreachable", "smtp unreachable", "auth failed"])
+
+    def _boom(**kwargs):
+        raise RuntimeError(next(errors))
+
+    monkeypatch.setattr("app.core.alert_email.send_alert_email", _boom)
+    monkeypatch.setattr(
+        "app.core.alert_email.compute_active_alerts",
+        lambda db: [Alert(kind="health_degraded", key="health_degraded", title="t", detail="d")],
+    )
+
+    for _ in range(4):
+        _run()
+
+    db = SessionLocal()
+    assert [row.error for row in db.query(MailLog).order_by(MailLog.id)] == ["smtp unreachable", "auth failed"]
+    db.close()
