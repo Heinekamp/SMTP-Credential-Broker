@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import typer
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import Column, Table, select, update
 
 import app.models  # noqa: F401 - registers every table on Base.metadata
@@ -37,6 +38,18 @@ def _check_password_length(password: str) -> None:
         raise typer.Exit(code=1)
 
 
+def _normalize_email(email: str) -> str:
+    """The same normalisation the API applies to every email (pydantic's
+    EmailStr: e.g. a lower-cased domain). Login looks admins up by the
+    normalised form, so an email stored as typed — `Admin@Example.COM` —
+    could never log in (#199)."""
+    try:
+        return TypeAdapter(EmailStr).validate_python(email)
+    except ValidationError as exc:
+        typer.echo(f"Not a valid email address: {email!r}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 @cli.command("create-admin")
 def create_admin(
     email: str = typer.Option(..., prompt=True),
@@ -49,6 +62,7 @@ def create_admin(
     slice.
     """
     _check_password_length(password)
+    email = _normalize_email(email)
     db = SessionLocal()
     try:
         if db.query(AdminUser).filter(AdminUser.email == email).one_or_none() is not None:
@@ -76,6 +90,7 @@ def reset_admin_password(
     session is exactly the kind of thing a forgotten-password recovery
     should not leave usable)."""
     _check_password_length(password)
+    email = _normalize_email(email)
     db = SessionLocal()
     try:
         admin = db.query(AdminUser).filter(AdminUser.email == email).one_or_none()
@@ -100,6 +115,7 @@ def disable_totp(email: str = typer.Argument(..., help="Email of the admin to di
     being logged in), so a locked-out admin with no other admin account
     had no way back in short of hand-editing the database. Revokes every
     active session, same rationale as reset-admin-password."""
+    email = _normalize_email(email)
     db = SessionLocal()
     try:
         admin = db.query(AdminUser).filter(AdminUser.email == email).one_or_none()

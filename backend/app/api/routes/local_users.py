@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_csrf
@@ -126,7 +127,10 @@ def create_user(
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(get_current_admin),
 ) -> LocalUserCreateResponse:
-    if db.query(LocalSmtpUser).filter(LocalSmtpUser.username == payload.username).one_or_none():
+    # Case-insensitively: Postfix folds lookup-map keys (sender_login's
+    # owner lists, sasldb2 usernames) to lower case, so `Printer` and
+    # `printer` would be the same login to it (#199).
+    if db.query(LocalSmtpUser).filter(func.lower(LocalSmtpUser.username) == payload.username.lower()).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already in use")
     if _deleted_since_last_apply(db, payload.username):
         raise HTTPException(

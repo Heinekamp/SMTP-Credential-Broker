@@ -1,3 +1,5 @@
+import threading
+
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +29,8 @@ router = APIRouter(prefix="/admins", tags=["admins"], dependencies=[Depends(get_
 # The name shown alongside the account in the admin's authenticator app —
 # matches the product name the frontend's title bar shows (Titlebar.tsx).
 _TOTP_ISSUER = "SMTP Credential Broker"
+
+_admin_status_lock = threading.Lock()
 
 
 def _require_current_password(db: Session, admin: AdminUser, password: str, request: Request) -> None:
@@ -115,24 +119,30 @@ def update_admin(
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Admin not found")
 
-    if payload.is_active != target.is_active:
-        if not payload.is_active:
-            active_count = db.query(AdminUser).filter(AdminUser.is_active.is_(True)).count()
-            if active_count <= 1:
-                raise HTTPException(status.HTTP_409_CONFLICT, "Can't deactivate the last active admin")
-            revoke_all_sessions_for_admin(db, target.id)
-        target.is_active = payload.is_active
-        record_audit(
-            db,
-            admin_user_id=admin.id,
-            action="admin.reactivate" if payload.is_active else "admin.deactivate",
-            target_type="admin_user",
-            target_id=target.id,
-            detail={"email": target.email},
-            ip_address=client_ip(request),
-        )
-        db.commit()
+    # Serialized: two admins deactivating each other at the same moment
+    # could both count two active admins and both proceed, leaving none
+    # (#199). One uvicorn worker (backend/entrypoint.sh), so a process-wide
+    # lock is enough.
+    with _admin_status_lock:
         db.refresh(target)
+        if payload.is_active != target.is_active:
+            if not payload.is_active:
+                active_count = db.query(AdminUser).filter(AdminUser.is_active.is_(True)).count()
+                if active_count <= 1:
+                    raise HTTPException(status.HTTP_409_CONFLICT, "Can't deactivate the last active admin")
+                revoke_all_sessions_for_admin(db, target.id)
+            target.is_active = payload.is_active
+            record_audit(
+                db,
+                admin_user_id=admin.id,
+                action="admin.reactivate" if payload.is_active else "admin.deactivate",
+                target_type="admin_user",
+                target_id=target.id,
+                detail={"email": target.email},
+                ip_address=client_ip(request),
+            )
+            db.commit()
+            db.refresh(target)
     return _to_read(target)
 
 
