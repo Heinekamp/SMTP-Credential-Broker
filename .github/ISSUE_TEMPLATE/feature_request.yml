@@ -1,0 +1,75 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended questions or "is this possible?" ideas that aren't a concrete proposal yet, a [discussion](https://github.com/Heinekamp/SMTP-Credential-Broker/discussions) may be a better fit.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation or limitation you're running into, not just the feature itself.
+      placeholder: When I …, I have to … because …
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen. UI sketches, API shapes or config examples are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you're using today, or other approaches you thought about.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Installation / upgrade / startup
+        - Web UI / login / TOTP
+        - Upstream accounts
+        - Senders / sender permissions
+        - Local SMTP users / credentials
+        - Rate limiting / abuse detection
+        - Sending / relaying mail (Postfix)
+        - TLS certificate (Let's Encrypt, DNS-01)
+        - Mail log
+        - Alerts / email notifications
+        - Backup / restore / encryption key
+        - CLI (`relay …`)
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: existing-behavior
+    attributes:
+      label: Would this change what existing installs do after an upgrade?
+      description: New automated behavior ships as opt-in by default, so upgrades never silently change how a running relay behaves.
+      options:
+        - "No, it only adds something new"
+        - "Yes, but it could be opt-in"
+        - "Yes, and it should change for everyone"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+    validations:
+      required: false

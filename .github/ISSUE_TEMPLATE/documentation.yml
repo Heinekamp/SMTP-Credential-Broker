@@ -1,0 +1,39 @@
+name: Documentation
+description: Something in the docs or README is wrong, unclear or missing.
+labels: ["documentation"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Which page?
+      description: A link or path, ideally with the section heading.
+      placeholder: docs/installation.md#exposed-ports
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - Incorrect or out of date
+        - Unclear or hard to follow
+        - Missing information
+        - Typo / formatting
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong or missing?
+      description: If following the docs led to a problem, describe what you did and what happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or fix
+    validations:
+      required: false

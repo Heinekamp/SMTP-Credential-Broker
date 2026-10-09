@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Heinekamp/SMTP-Credential-Broker/security/advisories/new
+    about: Please report vulnerabilities privately, never as a public issue. See SECURITY.md.
+  - name: Troubleshooting guide
+    url: https://github.com/Heinekamp/SMTP-Credential-Broker/blob/main/docs/troubleshooting.md
+    about: Common startup, encryption, login and sending problems and how to fix them.
+  - name: Questions and ideas
+    url: https://github.com/Heinekamp/SMTP-Credential-Broker/discussions
+    about: Ask a question or float an idea that isn't a concrete bug or feature request yet.
