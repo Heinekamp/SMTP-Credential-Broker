@@ -545,3 +545,98 @@ def test_apply_config_on_first_boot_has_nothing_to_roll_back_to(
     assert result["success"] is False
     assert "rolled back" not in result["validation_detail"]
     assert start_attempts["count"] == 1
+
+
+# ── Input validation and file permissions (#159) ──────────────────────
+# The control surface runs as root; a compromised `app` must not be able
+# to turn it into "write any file" or "delete the whole queue".
+
+_posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+
+
+def _dispatch(request: object) -> dict:
+    """Runs one request through the real connection handler, the same
+    path a socket client hits — including its error handling."""
+    import json
+    import socket
+
+    server_side, client_side = socket.socketpair()
+    client_side.sendall(json.dumps(request).encode("utf-8"))
+    client_side.shutdown(socket.SHUT_WR)
+    control_surface._handle_connection(server_side)
+    response = client_side.recv(1_048_576)
+    client_side.close()
+    return json.loads(response)
+
+
+@pytest.mark.parametrize("name", ["../../../control_surface.py", "/etc/passwd", "sasl_passwd/../x", "unknown_map"])
+def test_apply_config_refuses_any_map_name_outside_the_allowlist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, name: str
+) -> None:
+    monkeypatch.setattr(control_surface, "POSTFIX_CONFIG_DIR", str(tmp_path / "postfix"))
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path / "relay"))
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: pytest.fail("must not run anything"))
+
+    response = _dispatch({**_fixed_apply_payload(), "op": "apply_config", "maps": {name: "pwned"}})
+
+    assert response["ok"] is False
+    assert "unknown map name" in response["error"]
+    assert not (tmp_path / "postfix").exists(), "nothing may be written before validation"
+
+
+def test_apply_config_rejects_a_non_object_maps_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: pytest.fail("must not run anything"))
+    response = _dispatch({**_fixed_apply_payload(), "op": "apply_config", "maps": ["sender_login"]})
+    assert response == {"ok": False, "error": "invalid request: 'maps' must be an object"}
+
+
+@pytest.mark.parametrize("queue_id", ["ALL", "-", "4BC1A1E0F2 extra", "../x", ""])
+@pytest.mark.parametrize("op", ["queue_delete", "queue_requeue"])
+def test_queue_ops_refuse_anything_but_a_single_queue_id(
+    monkeypatch: pytest.MonkeyPatch, op: str, queue_id: str
+) -> None:
+    """`postsuper -d ALL` deletes every message in the queue."""
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: pytest.fail("must not run postsuper"))
+    response = _dispatch({"op": op, "queue_id": queue_id})
+    assert response["ok"] is False
+    assert "invalid queue_id" in response["error"]
+
+
+def test_queue_delete_passes_a_valid_queue_id_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(control_surface, "_run", lambda args, **k: calls.append(args) or _completed(0))
+    assert _dispatch({"op": "queue_delete", "queue_id": "4BC1A1E0F2"}) == {"ok": True}
+    assert calls == [["postsuper", "-d", "4BC1A1E0F2"]]
+
+
+@pytest.mark.parametrize("username", ["-d", "user name", "a/b", "x" * 65, ""])
+def test_sasl_ops_refuse_an_invalid_username(monkeypatch: pytest.MonkeyPatch, username: str) -> None:
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: pytest.fail("must not run saslpasswd2"))
+    for op in ("sasl_set_user", "sasl_delete_user"):
+        response = _dispatch({"op": op, "username": username, "password": "x"})
+        assert response == {"ok": False, "error": "invalid request: invalid username"}
+
+
+@_posix_only
+def test_sasl_passwd_map_is_written_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import os
+    import stat
+
+    monkeypatch.setattr(control_surface, "RELAY_MAP_DIR", str(tmp_path))
+    monkeypatch.setattr(control_surface, "_run", lambda *a, **k: _completed(0))
+    control_surface._install_maps({"sasl_passwd": "a@b\tuser:secret\n", "sender_login": "a@b\tuser\n"})
+
+    assert stat.S_IMODE(os.stat(tmp_path / "sasl_passwd").st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(tmp_path / "sender_login").st_mode) == 0o644
+
+
+@_posix_only
+def test_tls_rollback_restores_the_private_key_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import os
+    import stat
+
+    monkeypatch.setattr(control_surface, "TLS_DIR", str(tmp_path))
+    control_surface._restore_tls_files({"relay.crt": "CERT", "relay.key": "KEY"})
+
+    assert stat.S_IMODE(os.stat(tmp_path / "relay.key").st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(tmp_path / "relay.crt").st_mode) == 0o644

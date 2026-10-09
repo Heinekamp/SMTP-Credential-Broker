@@ -78,13 +78,16 @@ threat model."*
 - The plaintext materialization exists in exactly one place:
   `/etc/postfix/relay/sasl_passwd(.lmdb)`, inside the `postfix` container's
   filesystem, not the `app` container's.
-- It is written with `0600` permissions, owned by root (the user Postfix
-  itself runs its privileged pickup as before dropping privileges — this
-  matches Postfix's own documented expectation for `smtp_sasl_password_maps`
-  files).
-- It never leaves that container: it is not on a volume shared with `app`
-  read-write; `app` only ever writes it (through the shared config volume,
-  §6) and never reads it back.
+- It is written with `0600` permissions, owned by root, from the moment
+  it's created (`postmap` gives the `.lmdb` the same mode as its source).
+  This matches Postfix's own documented expectation for
+  `smtp_sasl_password_maps` files: they're opened as root before the
+  `smtp` client drops privileges.
+- It never leaves that container. The maps live on the `relay_config`
+  volume, which only `postfix` mounts. `app` reaches the control surface
+  through a separate `control_socket` volume holding nothing but the
+  socket (§6), so it can write the file only through that RPC and can
+  never read it back (#159).
 - Compromise of the encrypted database alone (e.g. an exfiltrated SQLite
   file, without `ENCRYPTION_KEY`) does **not** expose upstream passwords.
 - Compromise of the `postfix` container's filesystem **does** expose
@@ -170,11 +173,22 @@ architecture.md §7), reading new maillog lines for mail_log ingestion
 container, these are exposed as a minimal, purpose-built control surface
 (a small Unix-socket RPC listener inside the `postfix` container, started by
 its entrypoint, accepting only a fixed, parameterized set of operations — no
-arbitrary command execution) reachable only over a socket on the shared
-volume, not over the network. This keeps the blast radius of an `app`
-compromise limited to "can regenerate config and query/manage the queue," not
-"has a general-purpose shell in the container that holds live upstream
-credentials."
+arbitrary command execution) reachable only over a socket on its own
+`control_socket` volume, not over the network. This keeps the blast radius
+of an `app` compromise limited to "can regenerate config and query/manage
+the queue," not "has a general-purpose shell in the container that holds
+live upstream credentials."
+
+The control surface runs as root, so it validates every request rather
+than trusting `app` (#159):
+- map names must be one of the generated maps, never a path;
+- usernames must match the same rule the API enforces;
+- queue IDs must be a single Postfix queue ID, never `ALL`, which
+  `postsuper` treats as every queued message;
+- every payload field is type-checked.
+
+Secret files (`sasl_passwd`, the TLS private key, including on rollback)
+are created `0600`, never briefly readable under the default umask.
 
 ## 7. Input validation
 

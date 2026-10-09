@@ -63,3 +63,16 @@ def test_delete_requires_csrf(admin_client: TestClient, monkeypatch: pytest.Monk
     response = admin_client.delete("/api/queue/4XYZ000001", headers=csrf_headers(admin_client))
     assert response.status_code == 204
     assert calls == ["4XYZ000001"]
+
+
+@pytest.mark.parametrize("method", ["post", "delete"])
+def test_queue_id_all_is_rejected_before_reaching_postfix(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    """Regression test for #159: `postsuper -d ALL` deletes every queued
+    message — a single-message endpoint must never pass it through."""
+    monkeypatch.setattr("app.api.routes.queue.queue_delete", lambda _id: pytest.fail("must not be called"))
+    monkeypatch.setattr("app.api.routes.queue.queue_requeue", lambda _id: pytest.fail("must not be called"))
+    path = "/api/queue/ALL/retry" if method == "post" else "/api/queue/ALL"
+    response = getattr(admin_client, method)(path, headers=csrf_headers(admin_client))
+    assert response.status_code == 422

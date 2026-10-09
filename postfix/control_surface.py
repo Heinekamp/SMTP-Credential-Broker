@@ -28,13 +28,18 @@ image only needs a bare `python3` package, not a virtualenv.
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 
-CONTROL_SOCKET_PATH = os.environ.get("CONTROL_SOCKET_PATH", "/etc/postfix/relay/control.sock")
+# Its own volume (docker-compose.yml's `control_socket`), deliberately not
+# the relay_config one the lookup maps live in — `app` mounts only this
+# directory, so it can reach the socket without being able to read the
+# plaintext upstream passwords in sasl_passwd (security-model.md §3, #159).
+CONTROL_SOCKET_PATH = os.environ.get("CONTROL_SOCKET_PATH", "/run/relay-control/control.sock")
 SASL_REALM = os.environ.get("RELAY_SUBMISSION_HOST", "smtp-relay.internal")
 SASLDB_PATH = "/etc/sasldb2"
 SASLDB_DIR = os.environ.get("SASLDB_DIR", "/var/lib/postfix-sasldb")
@@ -43,6 +48,69 @@ RELAY_MAP_DIR = "/etc/postfix/relay"
 MAP_TYPE = "lmdb"
 MAILLOG_PATH = "/var/log/postfix/maillog"
 TLS_DIR = "/etc/postfix/tls"
+
+# This process runs as root, so it must not trust its caller any further
+# than the operations it offers (security-model.md §6, #159): every name
+# that becomes a path or a command argument is checked against exactly
+# what the app is ever supposed to send.
+_MAP_NAMES = frozenset({"sender_login", "sender_relayhost", "sasl_passwd", "sender_transport", "tls_policy"})
+# Maps holding secrets — written 0600 *before* postmap, which gives the
+# .lmdb it builds the same permissions as its source file.
+_SECRET_MAP_NAMES = frozenset({"sasl_passwd"})
+# Same rule as the app's LocalUserCreate.username (backend/app/schemas/local_user.py).
+_USERNAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Postfix queue IDs, short (hex) or long format. Notably excludes `ALL`,
+# which postsuper -d / -r would treat as "every message in the queue".
+_QUEUE_ID_RE = re.compile(r"[0-9A-Za-z]{6,20}")
+
+
+class InvalidRequest(ValueError):
+    pass
+
+
+def _require_str(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise InvalidRequest(f"{key!r} must be a string")
+    return value
+
+
+def _require_username(payload: dict) -> str:
+    username = _require_str(payload, "username")
+    if not _USERNAME_RE.fullmatch(username):
+        raise InvalidRequest("invalid username")
+    return username
+
+
+def _require_queue_id(payload: dict) -> str:
+    queue_id = _require_str(payload, "queue_id")
+    if not _QUEUE_ID_RE.fullmatch(queue_id):
+        raise InvalidRequest("invalid queue_id")
+    return queue_id
+
+
+def _require_maps(payload: dict) -> dict[str, str]:
+    maps = payload.get("maps")
+    if not isinstance(maps, dict):
+        raise InvalidRequest("'maps' must be an object")
+    for name, content in maps.items():
+        if name not in _MAP_NAMES:
+            raise InvalidRequest(f"unknown map name: {name!r}")
+        if not isinstance(content, str):
+            raise InvalidRequest(f"map {name!r} content must be a string")
+    return maps
+
+
+def _write_file(path: str, content: str, mode: int) -> None:
+    """Writes `content` to `path` via a temp file and an atomic rename, with
+    `mode` applied from creation — never briefly readable under the
+    default umask, and never left at 0644 on a later rewrite."""
+    tmp_path = path + ".new"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(content)
+    os.chmod(tmp_path, mode)  # O_CREAT's mode is masked by umask, and ignored for an existing file
+    os.replace(tmp_path, path)
 
 
 def _run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -68,8 +136,8 @@ def _sync_sasldb_to_volume() -> None:
 
 
 def _sasl_set_user(payload: dict) -> dict:
-    username = payload["username"]
-    password = payload["password"]
+    username = _require_username(payload)
+    password = _require_str(payload, "password")
     # Password piped via stdin, never an argv (visible to other processes
     # via /proc) and never logged — postfix-architecture.md §5.
     result = _run(
@@ -100,7 +168,7 @@ def _sasl_user_exists(username: str) -> bool:
 
 
 def _sasl_delete_user(payload: dict) -> dict:
-    username = payload["username"]
+    username = _require_username(payload)
     # Idempotent delete (matches the app-side revoke/disable semantics):
     # check existence first with a real command rather than guessing from
     # saslpasswd2's own stderr wording, which is version/locale-dependent.
@@ -145,11 +213,9 @@ def _validate_staged_config(main_cf: str, master_cf: str) -> tuple[bool, str]:
 def _install_maps(maps: dict[str, str]) -> None:
     os.makedirs(RELAY_MAP_DIR, exist_ok=True)
     for name, content in maps.items():
+        # `name` is one of _MAP_NAMES (_require_maps) — never a path.
         source_path = os.path.join(RELAY_MAP_DIR, name)
-        tmp_path = source_path + ".new"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, source_path)  # atomic on the same filesystem
+        _write_file(source_path, content, 0o600 if name in _SECRET_MAP_NAMES else 0o644)
         result = _run(["postmap", f"{MAP_TYPE}:{source_path}"])
         if result.returncode != 0:
             raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
@@ -187,10 +253,10 @@ def _restore_config(previous: dict[str, str | None]) -> None:
 
 
 def _apply_config(payload: dict) -> dict:
-    main_cf = payload["main_cf"]
-    master_cf = payload["master_cf"]
-    maps = payload["maps"]
-    reload_if_main_changed = payload["reload_if_main_changed"]
+    main_cf = _require_str(payload, "main_cf")
+    master_cf = _require_str(payload, "master_cf")
+    maps = _require_maps(payload)
+    reload_if_main_changed = payload.get("reload_if_main_changed") is True
 
     valid, detail = _validate_staged_config(main_cf, master_cf)
     if not valid:
@@ -267,23 +333,16 @@ def _read_tls_files() -> dict[str, str | None]:
 
 def _write_tls_files(cert_pem: str, key_pem: str) -> None:
     for filename, content, mode in (("relay.crt", cert_pem, 0o644), ("relay.key", key_pem, 0o600)):
-        live_path = os.path.join(TLS_DIR, filename)
-        tmp_path = live_path + ".new"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(tmp_path, mode)
-        os.replace(tmp_path, live_path)
+        _write_file(os.path.join(TLS_DIR, filename), content, mode)
 
 
 def _restore_tls_files(previous: dict[str, str | None]) -> None:
     for filename, content in previous.items():
         if content is None:  # didn't exist before install — nothing to restore
             continue
-        live_path = os.path.join(TLS_DIR, filename)
-        tmp_path = live_path + ".new"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, live_path)
+        # Same modes as _write_tls_files — a rollback must not leave the
+        # private key world-readable (#159).
+        _write_file(os.path.join(TLS_DIR, filename), content, 0o600 if filename == "relay.key" else 0o644)
 
 
 def _install_tls_certificate(payload: dict) -> dict:
@@ -298,8 +357,8 @@ def _install_tls_certificate(payload: dict) -> dict:
     take down Postfix's live TLS: nothing on disk is touched unless both
     checks below pass, and a failed `postfix start` after a valid install
     restores the previous cert/key, same invariant as _apply_config."""
-    cert_pem = payload["cert_pem"]
-    key_pem = payload["key_pem"]
+    cert_pem = _require_str(payload, "cert_pem")
+    key_pem = _require_str(payload, "key_pem")
 
     with tempfile.TemporaryDirectory() as staging_dir:
         cert_tmp = os.path.join(staging_dir, "cert.pem")
@@ -420,14 +479,14 @@ def _queue_list(payload: dict) -> dict:
 
 
 def _queue_requeue(payload: dict) -> dict:
-    result = _run(["postsuper", "-r", payload["queue_id"]])
+    result = _run(["postsuper", "-r", _require_queue_id(payload)])
     if result.returncode != 0:
         return {"ok": False, "error": f"postsuper -r failed: {result.stderr.strip()}"}
     return {"ok": True}
 
 
 def _queue_delete(payload: dict) -> dict:
-    result = _run(["postsuper", "-d", payload["queue_id"]])
+    result = _run(["postsuper", "-d", _require_queue_id(payload)])
     if result.returncode != 0:
         return {"ok": False, "error": f"postsuper -d failed: {result.stderr.strip()}"}
     return {"ok": True}
@@ -457,11 +516,15 @@ def _handle_connection(conn: socket.socket) -> None:
             chunks.append(chunk)
         try:
             request = json.loads(b"".join(chunks).decode("utf-8"))
+            if not isinstance(request, dict):
+                raise InvalidRequest("request must be a JSON object")
             handler = _HANDLERS.get(request.get("op"))
             if handler is None:
                 response = {"ok": False, "error": f"unknown op: {request.get('op')!r}"}
             else:
                 response = handler(request)
+        except InvalidRequest as exc:
+            response = {"ok": False, "error": f"invalid request: {exc}"}
         except Exception as exc:  # noqa: BLE001 - a survivable per-request failure, not a crash
             response = {"ok": False, "error": f"control surface error: {exc}"}
         conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
