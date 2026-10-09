@@ -123,6 +123,20 @@ app.include_router(tls_settings.router, prefix="/api")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+
+def _spa_file(static_dir: Path, full_path: str) -> Path:
+    """The file the SPA fallback should serve for `full_path`: that static
+    asset if it really exists *inside* `static_dir`, otherwise index.html.
+    `full_path` is attacker-controlled and already percent-decoded, so
+    `..` segments (`/%2e%2e/...`, `/..%2f...`) and absolute paths
+    (`//etc/...`, which `Path.__truediv__` lets replace the base) must not
+    escape the static dir — resolve first, then check containment."""
+    candidate = (static_dir / full_path).resolve()
+    if full_path and candidate.is_relative_to(static_dir) and candidate.is_file():
+        return candidate
+    return static_dir / "index.html"
+
+
 if _STATIC_DIR.is_dir():
     # Serve the built frontend. A plain StaticFiles(html=True) mount alone
     # 404s on a hard refresh of a client-side route like /senders, so any
@@ -133,7 +147,4 @@ if _STATIC_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str) -> FileResponse:
-        candidate = _STATIC_DIR / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_STATIC_DIR / "index.html")
+        return FileResponse(_spa_file(_STATIC_DIR, full_path))
