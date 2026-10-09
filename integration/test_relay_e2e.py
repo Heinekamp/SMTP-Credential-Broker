@@ -242,6 +242,59 @@ def test_permission_change_takes_effect_after_regeneration(api: httpx.Client, st
     assert _wait_for_delivery(lambda d: d["mail_from"] == alerts_address) is not None
 
 
+def test_null_sender_from_authenticated_user_is_rejected(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for #151: `reject_sender_login_mismatch` doesn't
+    apply to the null sender, and with `relayhost =` empty an unrouted
+    `MAIL FROM:<>` would go straight to the recipient's MX from the relay's
+    own IP — bypassing both sender authorization and every upstream
+    account. Any authenticated local user, even one with no grants at all,
+    must be refused."""
+    _, password = create_local_user(api, name="Null Sender Test", username=f"null-sender-{uid}")
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"null-sender-{uid}", password)
+    client.mail("")  # MAIL FROM:<>; sender restrictions are evaluated at RCPT
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code >= 500, f"expected the null sender to be rejected, got {rcpt_code} {rcpt_msg!r}"
+    client.rset()
+    client.quit()
+
+
+def test_sender_of_disabled_upstream_account_is_rejected(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for #151: disabling an upstream account used to drop
+    its senders only from the routing maps, not from sender_login — so the
+    local users granted those senders could still send as them, and with
+    no relayhost entry left the mail went direct-to-MX instead of failing.
+    Disabling the account must make its senders unusable."""
+    address = f"disabled-upstream-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="To be disabled", username="disabled@example.com", password="disabled-upstream-pass"
+    )
+    sender_id = create_sender(api, address=address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Disabled Upstream", username=f"disabled-upstream-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"disabled-upstream-{uid}", password)
+    client.sendmail(address, ["dest@example.net"], "Subject: t\n\nb")
+    client.quit()
+    assert _wait_for_delivery(lambda d: d["mail_from"] == address) is not None
+
+    api.patch(f"/api/upstream-accounts/{account_id}", json={"enabled": False}).raise_for_status()
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"disabled-upstream-{uid}", password)
+    mail_code, _ = client.mail(address)
+    assert mail_code == 250
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code == 553, f"expected rejection once the upstream is disabled, got {rcpt_code} {rcpt_msg!r}"
+    client.rset()
+    client.quit()
+
+
 def test_open_relay_is_prevented_without_authentication(api: httpx.Client) -> None:
     # Deliberately the submission port (587), not plain smtp (25): port 25
     # is bound loopback-only by design (postfix-architecture.md §3) and
