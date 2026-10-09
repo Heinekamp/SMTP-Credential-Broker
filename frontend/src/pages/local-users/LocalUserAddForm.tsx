@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, TextInput } from "../../design-system/components";
+import { ApiError } from "../../lib/apiClient";
 import { createLocalUser } from "../../lib/api/localUsers";
 
 function suggestUsername(name: string): string {
@@ -45,7 +46,12 @@ export function LocalUserAddForm() {
       queryClient.invalidateQueries({ queryKey: ["local-users"] });
       navigate(`/local-users/${result.user.id}/reveal`, { state: { password: result.password } });
     },
-    onError: () => setError("Could not create this user. The username may already be in use."),
+    onError: (err) =>
+      setError(
+        err instanceof ApiError && typeof err.detail === "string"
+          ? err.detail
+          : "Could not create this user. The username may already be in use.",
+      ),
   });
 
   function submit(e: FormEvent) {

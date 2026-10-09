@@ -170,12 +170,15 @@ the database.
 
 ### A newly added sender/permission doesn't seem to take effect
 
-Config is applied atomically on generation, not instantly on every
-database write (architecture.md §5) — check the Settings screen's config
-generation history for whether a generation actually ran and succeeded
-after your change. Most UI actions that need this trigger it
-automatically; if you scripted a change directly against the API in an
-unusual way, confirm you didn't bypass the route that does so.
+Changes to senders, permissions and upstream accounts reach Postfix only
+when the configuration is **applied**, which is deliberately a manual
+step (architecture.md §5). While the database and the live config differ,
+every page shows a *Pending configuration changes* banner with an **Apply
+now** button. Settings → System has the same Generate & Apply action and
+the generation history, which shows whether a generation ran and passed
+validation after your change. `relay generate-config` does the same from
+the CLI. (Disabling, deleting or regenerating a *local user* is the
+exception: that changes SMTP AUTH immediately.)
 
 ## Getting more detail
 

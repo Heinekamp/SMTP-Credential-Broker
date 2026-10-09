@@ -178,7 +178,7 @@ export function UpstreamAccountsList() {
       {disableTarget && (
         <ConfirmModal
           title={`Disable "${disableTarget.name}"?`}
-          body="Services depending on this will stop working immediately until it is re-enabled."
+          body="Services depending on this will stop sending through it once the configuration is next applied, until it is re-enabled."
           confirmLabel="Disable"
           variant="danger"
           confirming={toggleEnabled.isPending}

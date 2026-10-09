@@ -176,7 +176,7 @@ export function SendersList() {
       {disableTarget && (
         <ConfirmModal
           title={`Disable "${disableTarget.address}"?`}
-          body="Local users depending on this sender will be unable to send as this address immediately until it is re-enabled."
+          body="Local users depending on this sender will be unable to send as this address once the configuration is next applied, until it is re-enabled."
           confirmLabel="Disable"
           variant="danger"
           confirming={toggleEnabled.isPending}

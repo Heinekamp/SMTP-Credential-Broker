@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 
+import { PendingConfigBanner } from "./PendingConfigBanner";
 import { Sidenav } from "./Sidenav";
 import { Titlebar } from "./Titlebar";
 
@@ -24,6 +25,7 @@ export function AppShell() {
       </div>
       <Sidenav />
       <main style={{ overflow: "auto", padding: 24 }}>
+        <PendingConfigBanner />
         <Outlet />
       </main>
     </div>
