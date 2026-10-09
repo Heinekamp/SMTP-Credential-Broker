@@ -47,6 +47,14 @@ POSTFIX_CONFIG_DIR = "/etc/postfix"
 RELAY_MAP_DIR = "/etc/postfix/relay"
 MAP_TYPE = "lmdb"
 MAILLOG_PATH = "/var/log/postfix/maillog"
+# One tail_maillog call returns at most this much — the caller catches up
+# over several calls rather than receiving an unbounded backlog in one
+# JSON response (#195).
+_MAILLOG_MAX_READ_BYTES = 4 * 1024 * 1024
+# Once ingestion has fully caught up with a maillog this large, it's
+# rotated (`postfix logrotate`), keeping only the newest rotated copy —
+# nothing else ever trimmed it (#195).
+_MAILLOG_ROTATE_BYTES = 32 * 1024 * 1024
 TLS_DIR = "/etc/postfix/tls"
 
 # This process runs as root, so it must not trust its caller any further
@@ -507,11 +515,40 @@ def _tail_maillog(payload: dict) -> dict:
         truncated = since_offset > size
     start = 0 if truncated else since_offset
 
-    with open(MAILLOG_PATH, encoding="utf-8", errors="replace") as f:
+    with open(MAILLOG_PATH, "rb") as f:
         f.seek(start)
-        data = f.read()
+        chunk = f.read(_MAILLOG_MAX_READ_BYTES)
+    # Only complete lines are consumed, and the new offset is exactly what
+    # was consumed. It used to be a size taken by stat() *before* reading
+    # to EOF, so lines appended in between were returned now and again on
+    # the next call; a half-written last line could also come back cut off.
+    complete = chunk[: chunk.rfind(b"\n") + 1]
+    new_offset = start + len(complete)
+    lines = complete.decode("utf-8", errors="replace").splitlines()
 
-    return {"ok": True, "lines": data.splitlines(), "new_offset": size, "truncated": truncated, "inode": inode}
+    if new_offset >= size and size >= _MAILLOG_ROTATE_BYTES:
+        _rotate_maillog()
+
+    return {"ok": True, "lines": lines, "new_offset": new_offset, "truncated": truncated, "inode": inode}
+
+
+def _rotate_maillog() -> None:
+    """`postfix logrotate` renames the maillog aside and makes postlogd
+    reopen a fresh file; the next tail_maillog sees the new inode and
+    starts from its beginning. Only called once everything up to the end
+    of the old file has been handed out, and only the newest rotated copy
+    is kept — the volume would otherwise still grow without bound."""
+    result = _run(["postfix", "logrotate"])
+    if result.returncode != 0:
+        return
+    log_dir = os.path.dirname(MAILLOG_PATH)
+    base = os.path.basename(MAILLOG_PATH) + "."
+    rotated = sorted(name for name in os.listdir(log_dir) if name.startswith(base))
+    for old in rotated[:-1]:
+        try:
+            os.remove(os.path.join(log_dir, old))
+        except OSError:
+            pass
 
 
 def _status(payload: dict) -> dict:
