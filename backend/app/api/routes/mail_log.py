@@ -1,6 +1,7 @@
 import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
@@ -69,3 +70,14 @@ def list_mail_log(
     total = query.count()
     entries = query.order_by(MailLog.timestamp.desc(), MailLog.id.desc()).offset(offset).limit(limit).all()
     return MailLogPage(entries=[MailLogEntry.model_validate(e) for e in entries], total=total)
+
+
+@router.get("/{entry_id}", response_model=MailLogEntry)
+def get_mail_log_entry(entry_id: int, db: Session = Depends(get_db)) -> MailLogEntry:
+    """One entry by id, for the detail view — which used to look it up in
+    a fixed window of the 200 newest rows, failing for anything older
+    (#205)."""
+    entry = db.get(MailLog, entry_id)
+    if entry is None:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, "Mail log entry not found")
+    return MailLogEntry.model_validate(entry)

@@ -32,6 +32,12 @@ export interface MailLogFilter {
   offset?: number;
 }
 
+export const MAIL_STATUSES: MailStatus[] = ["queued", "sent", "deferred", "bounced", "rejected"];
+
+export function getMailLogEntry(id: number): Promise<MailLogEntry> {
+  return apiFetch<MailLogEntry>(`/api/mail-log/${id}`);
+}
+
 export function listMailLog(filter: MailLogFilter = {}): Promise<MailLogPage> {
   const params = new URLSearchParams();
   if (filter.envelope_sender) params.set("envelope_sender", filter.envelope_sender);
