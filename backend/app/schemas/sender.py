@@ -2,6 +2,8 @@ import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from app.schemas.common import PartialUpdate
+
 
 class SenderCreate(BaseModel):
     # EmailStr (not plain str): this address is tab-joined with other
@@ -17,11 +19,13 @@ class SenderCreate(BaseModel):
     description: str | None = None
 
 
-class SenderUpdate(BaseModel):
+class SenderUpdate(PartialUpdate):
     address: EmailStr | None = None
     upstream_account_id: int | None = None
     enabled: bool | None = None
     description: str | None = None
+
+    NON_NULLABLE = frozenset({"address", "upstream_account_id", "enabled"})
 
 
 class SenderRead(BaseModel):

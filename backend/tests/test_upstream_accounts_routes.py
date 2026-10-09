@@ -363,3 +363,13 @@ def test_account_names_reject_line_breaks(admin_client: TestClient) -> None:
         headers=csrf_headers(admin_client),
     )
     assert response.status_code == 422
+
+
+def test_explicit_null_on_a_required_account_field_is_a_422_not_a_500(admin_client: TestClient) -> None:
+    """Regression test for #189: these reached the database as NULL."""
+    created = _create(admin_client)
+    for field in ("name", "host", "port", "tls_mode", "username", "enabled", "tls_skip_verify"):
+        assert _patch(admin_client, created["id"], {field: None}).status_code == 422, field
+    # Null where it means something is still fine.
+    assert _patch(admin_client, created["id"], {"rate_limit_per_hour": None}).status_code == 200
+    assert _patch(admin_client, created["id"], {"password": None}).status_code == 200

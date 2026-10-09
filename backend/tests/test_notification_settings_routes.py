@@ -243,3 +243,32 @@ def test_send_test_alert_is_audited(
 def test_send_test_alert_requires_csrf(admin_client: TestClient) -> None:
     response = admin_client.post("/api/notification-settings/test")
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"audit_log_retention_days": 0},
+        {"audit_log_retention_days": -1},
+        {"mail_log_retention_days": 0},
+        {"connection_test_interval_minutes": 0},
+        {"notify_on_health_degraded": None},
+        {"notify_recipients": None},
+        {"rate_limit_abuse_threshold_minutes": None},
+    ],
+)
+def test_rejects_values_that_would_wipe_data_or_break_constraints(admin_client: TestClient, body: dict) -> None:
+    """Regression test for #189: retention <= 0 deleted the whole audit log
+    (including login failures the lockout counts), interval 0 meant an AUTH
+    attempt every minute, and explicit nulls on NOT NULL columns were 500s."""
+    response = admin_client.patch("/api/notification-settings", json=body, headers=csrf_headers(admin_client))
+    assert response.status_code == 422, body
+
+
+def test_null_retention_and_interval_still_mean_off(admin_client: TestClient) -> None:
+    response = admin_client.patch(
+        "/api/notification-settings",
+        json={"audit_log_retention_days": None, "connection_test_interval_minutes": None},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 200

@@ -503,3 +503,34 @@ def test_a_username_deleted_before_the_last_apply_can_be_reused(
     assert admin_client.delete(f"/api/local-users/{user_id}", headers=csrf_headers(admin_client)).status_code == 204
     _record_applied_generation(db_session)
     assert _create_user(admin_client, "app2").status_code == 201
+
+
+def test_explicit_null_enabled_is_rejected_without_touching_sasldb(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    """Regression test for #189: `{"enabled": null}` took the re-enable branch
+    — a new password and a sasldb2 write nobody asked for."""
+    user_id = _create_user(admin_client, "nullable").json()["user"]["id"]
+    calls_before = len(fake_postfix_control)
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}", json={"enabled": None}, headers=csrf_headers(admin_client)
+    )
+    assert response.status_code == 422
+    assert len(fake_postfix_control) == calls_before
+
+
+def test_re_enable_with_invalid_rate_limits_never_writes_sasldb(
+    admin_client: TestClient, fake_postfix_control: list
+) -> None:
+    """Regression test for #189: validation used to run after the sasldb2
+    write, so a 422 left a live credential for a user the DB shows disabled."""
+    user_id = _create_user(admin_client, "reenable-invalid").json()["user"]["id"]
+    admin_client.patch(f"/api/local-users/{user_id}", json={"enabled": False}, headers=csrf_headers(admin_client))
+    calls_before = len(fake_postfix_control)
+    response = admin_client.patch(
+        f"/api/local-users/{user_id}",
+        json={"enabled": True, "rate_limit_burst": 5},  # burst without an hourly limit is invalid
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422
+    assert len(fake_postfix_control) == calls_before

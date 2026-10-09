@@ -2,7 +2,7 @@ import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.common import SingleLineName
+from app.schemas.common import PartialUpdate, SingleLineName
 
 
 class LocalUserCreate(BaseModel):
@@ -28,11 +28,15 @@ class LocalUserCreate(BaseModel):
     rate_limit_burst: int | None = Field(default=None, ge=1)
 
 
-class LocalUserUpdate(BaseModel):
+class LocalUserUpdate(PartialUpdate):
     name: SingleLineName | None = None
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
     rate_limit_burst: int | None = Field(default=None, ge=1)
+
+    # `{"enabled": null}` used to take the re-enable branch — a new
+    # password and a sasldb2 write nobody asked for (#189).
+    NON_NULLABLE = frozenset({"name", "enabled"})
 
 
 class LocalUserRead(BaseModel):

@@ -196,6 +196,14 @@ def update_user(
     data = payload.model_dump(exclude_unset=True)
     new_password: str | None = None
 
+    # Validated before any sasldb2 write below: re-enabling writes a live
+    # credential, and a 422 afterwards rolled back only the database —
+    # leaving a working credential for a user the DB shows disabled (#189).
+    effective_hourly = data.get("rate_limit_per_hour", user.rate_limit_per_hour)
+    effective_burst = data.get("rate_limit_burst", user.rate_limit_burst)
+    if "rate_limit_per_hour" in data or "rate_limit_burst" in data:
+        _validate_rate_limits(rate_limit_per_hour=effective_hourly, rate_limit_burst=effective_burst)
+
     if "enabled" in data and data["enabled"] != user.enabled:
         if data["enabled"] is False:
             user.enabled = False
@@ -226,13 +234,10 @@ def update_user(
             db.flush()
             _set_sasl_or_503(user.username, new_password)
 
-    if "name" in data and data["name"] is not None:
+    if "name" in data:
         user.name = data["name"]
 
     if "rate_limit_per_hour" in data or "rate_limit_burst" in data:
-        effective_hourly = data.get("rate_limit_per_hour", user.rate_limit_per_hour)
-        effective_burst = data.get("rate_limit_burst", user.rate_limit_burst)
-        _validate_rate_limits(rate_limit_per_hour=effective_hourly, rate_limit_burst=effective_burst)
         user.rate_limit_per_hour = effective_hourly
         user.rate_limit_burst = effective_burst
 
