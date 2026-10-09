@@ -12,6 +12,8 @@ from app.core.postfix_control import PostfixControlError
 from app.core.rate_limit_policy import current_burst_tokens, current_usage
 from app.core.security import hash_password
 from app.models.admin import AdminUser
+from app.models.audit import AuditLog
+from app.models.config_generation import ConfigGeneration
 from app.models.local_user import LocalSmtpUser, UserSenderPermission
 from app.models.sender import Sender
 from app.schemas.local_user import (
@@ -74,6 +76,24 @@ def _validate_rate_limits(*, rate_limit_per_hour: int | None, rate_limit_burst: 
         )
 
 
+def _deleted_since_last_apply(db: Session, username: str) -> bool:
+    """Whether a local user with this username was deleted after the last
+    configuration Postfix actually loaded. Config apply is manual, so until
+    then the live sender_login map still lists that name as an owner of the
+    old user's senders — a new user created under it would inherit them
+    (#177)."""
+    last_applied = (
+        db.query(ConfigGeneration.generated_at)
+        .filter(ConfigGeneration.applied.is_(True))
+        .order_by(ConfigGeneration.generated_at.desc())
+        .first()
+    )
+    deletions = db.query(AuditLog.timestamp, AuditLog.detail).filter(AuditLog.action == "local_user.delete")
+    if last_applied is not None:
+        deletions = deletions.filter(AuditLog.timestamp > last_applied[0])
+    return any((detail or {}).get("username") == username for _, detail in deletions.all())
+
+
 def _set_sasl_or_503(username: str, password: str) -> None:
     try:
         postfix_control.sasl_set_user(username, password)
@@ -108,6 +128,13 @@ def create_user(
 ) -> LocalUserCreateResponse:
     if db.query(LocalSmtpUser).filter(LocalSmtpUser.username == payload.username).one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already in use")
+    if _deleted_since_last_apply(db, payload.username):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A local user named {payload.username!r} was deleted since the configuration was last applied, so "
+            "Postfix still lets that name send as the old user's senders. Apply the pending configuration "
+            "changes first, then create the user.",
+        )
     _validate_rate_limits(rate_limit_per_hour=payload.rate_limit_per_hour, rate_limit_burst=payload.rate_limit_burst)
 
     password = generate_password()

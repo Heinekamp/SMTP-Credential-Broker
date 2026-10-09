@@ -39,7 +39,7 @@ export function LocalUserPermissions() {
         User: {data?.user.name}
       </h1>
       <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0, marginBottom: 16 }}>
-        Allowed senders
+        Allowed senders — changes take effect in Postfix once the configuration is applied.
       </p>
 
       {error && (

@@ -94,7 +94,7 @@ class of bug rather than trying to catch it every time).
 | `id` | integer PK | |
 | `address` | text, unique, not null | e.g. `noreply@example.com` |
 | `upstream_account_id` | FK → `upstream_accounts.id`, not null | **one sender → one upstream account** (see architecture.md §9 for why this default was chosen) |
-| `enabled` | boolean, not null, default true | disabled senders are dropped from `smtpd_sender_login_maps` and `sender_dependent_relayhost_maps` on next generation, immediately revoking their use |
+| `enabled` | boolean, not null, default true | disabled senders are dropped from `smtpd_sender_login_maps` and `sender_dependent_relayhost_maps` the next time the configuration is applied (a manual step; the UI shows a pending-changes banner until then) |
 | `description` | text, nullable | free-form admin note |
 | `created_at` / `updated_at` | timestamp | |
 
@@ -108,7 +108,7 @@ Credentials issued to internal services (InvenTree, monitoring, printers...).
 | `name` | text, not null | admin-facing label, e.g. "InvenTree" |
 | `username` | text, unique, not null | the SASL/AUTH username, e.g. `inventree` |
 | `password_hash` | text, not null | Argon2id — **bookkeeping only**; the authoritative check happens in Cyrus SASL's `sasldb2` (security-model.md §4). Kept so the UI can show "password last changed" without ever re-reading the real secret. |
-| `enabled` | boolean, not null, default true | disabling removes the user from `sasldb2` on next generation, immediately revoking SMTP AUTH, without deleting history/permissions |
+| `enabled` | boolean, not null, default true | disabling removes the user from `sasldb2` immediately (no config apply needed), revoking SMTP AUTH without deleting history/permissions |
 | `created_at` | timestamp, not null | |
 | `password_last_rotated_at` | timestamp, nullable | |
 | `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Enforced by the rate-limit policy service (postfix-architecture.md §10, security-model.md §10) against §12's counter table, keyed on this user's `username` as the authenticated SASL identity. |

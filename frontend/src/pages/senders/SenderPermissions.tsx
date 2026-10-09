@@ -40,7 +40,7 @@ export function SenderPermissions() {
         Sender: {data?.sender.address}
       </h1>
       <p style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 0, marginBottom: 16 }}>
-        Allowed local users
+        Allowed local users — changes take effect in Postfix once the configuration is applied.
       </p>
 
       {error && (

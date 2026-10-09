@@ -456,3 +456,50 @@ def test_permission_view_from_user_side(admin_client: TestClient, fake_postfix_c
     view = admin_client.get(f"/api/local-users/{user_id}/permissions").json()
     assert view["senders"][0]["allowed"] is True
     assert view["user"]["allowed_sender_count"] == 1
+
+
+def _create_user(client: TestClient, username: str):
+    return client.post(
+        "/api/local-users", json={"name": username, "username": username}, headers=csrf_headers(client)
+    )
+
+
+def _record_applied_generation(db_session: Session) -> None:
+    from app.models.config_generation import ConfigGeneration
+    from app.models.enums import ValidationResult
+
+    db_session.add(
+        ConfigGeneration(
+            checksum="x" * 64, maps_checksum="y" * 64, validation_result=ValidationResult.pass_, applied=True
+        )
+    )
+    db_session.commit()
+
+
+def test_a_username_deleted_since_the_last_apply_cannot_be_reused(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    """Regression test for #177: config apply is manual, so until the next
+    apply Postfix's sender_login map still lists a deleted user's name as
+    owning its senders. A new user created under that name would inherit
+    them."""
+    user_id = _create_user(admin_client, "app1").json()["user"]["id"]
+    _record_applied_generation(db_session)
+    assert admin_client.delete(f"/api/local-users/{user_id}", headers=csrf_headers(admin_client)).status_code == 204
+
+    response = _create_user(admin_client, "app1")
+    assert response.status_code == 409
+    assert "Apply the pending configuration" in response.json()["detail"]
+
+    # Once a newer config has been applied, the name is free again.
+    _record_applied_generation(db_session)
+    assert _create_user(admin_client, "app1").status_code == 201
+
+
+def test_a_username_deleted_before_the_last_apply_can_be_reused(
+    admin_client: TestClient, db_session: Session, fake_postfix_control: list
+) -> None:
+    user_id = _create_user(admin_client, "app2").json()["user"]["id"]
+    assert admin_client.delete(f"/api/local-users/{user_id}", headers=csrf_headers(admin_client)).status_code == 204
+    _record_applied_generation(db_session)
+    assert _create_user(admin_client, "app2").status_code == 201
