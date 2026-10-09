@@ -16,6 +16,12 @@ function readCookie(name: string): string | null {
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/** The API's own error text when it sent one (FastAPI's string `detail`),
+ * otherwise `fallback` — so a failed action says *why* (#207). */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError && typeof err.detail === "string" ? err.detail : fallback;
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers(options.headers);

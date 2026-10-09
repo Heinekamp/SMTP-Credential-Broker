@@ -32,9 +32,15 @@ export function Titlebar() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   async function handleLogout() {
-    await logout();
-    await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
-    navigate("/login", { replace: true });
+    try {
+      await logout();
+    } catch {
+      // An already-expired session can't be logged out server-side (the
+      // endpoint itself needs one) — that must not leave the button dead (#207).
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
+      navigate("/login", { replace: true });
+    }
   }
 
   const operational = health?.status === "ok";

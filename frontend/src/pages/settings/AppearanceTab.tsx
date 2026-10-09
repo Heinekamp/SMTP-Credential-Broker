@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, TextInput } from "../../design-system/components";
-import { ApiError } from "../../lib/apiClient";
+import { ApiError, errorMessage } from "../../lib/apiClient";
 import { deleteLogo, fetchBranding, updateBranding, uploadLogo } from "../../lib/api/branding";
 
 const DEFAULT_ACCENT = "#72bf44";
@@ -58,7 +58,11 @@ export function AppearanceTab() {
 
   const remove = useMutation({
     mutationFn: () => deleteLogo(),
-    onSuccess: (data) => queryClient.setQueryData(["branding"], data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["branding"], data);
+      setUploadError(null);
+    },
+    onError: (err) => setUploadError(errorMessage(err, "Could not remove the logo.")),
   });
 
   const isValidHex = HEX_COLOR_RE.test(accentColor);

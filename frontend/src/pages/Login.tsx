@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { BrandLogo } from "../components/BrandLogo";
 import { Button, Card, TextInput } from "../design-system/components";
-import { ApiError, login, type RateLimitDetail } from "../lib/apiClient";
+import { ApiError, errorMessage, login, type RateLimitDetail } from "../lib/apiClient";
 import { SESSION_QUERY_KEY } from "../lib/useSession";
 
 type LoginStage = "normal" | "totp" | "rate-limited";
@@ -51,6 +51,19 @@ export function Login() {
         const detail = err.detail as RateLimitDetail;
         setRetryMessage(`Too many attempts. Try again in ${formatRetryAfter(detail.retry_after_seconds)}.`);
         setStage("rate-limited");
+        // Unlock the form once the lockout has passed — it used to stay
+        // locked until the page was reloaded (#207).
+        const resumeStage = stage === "totp" ? "totp" : "normal";
+        window.setTimeout(() => {
+          setStage(resumeStage);
+          setRetryMessage(null);
+        }, Math.max(1, detail.retry_after_seconds) * 1000);
+      } else if (!(err instanceof ApiError)) {
+        setError("Couldn't reach the server. Check your connection and try again.");
+      } else if (err.status === 422) {
+        setError("Enter a valid email address.");
+      } else if (err.status >= 500) {
+        setError(errorMessage(err, "The server couldn't complete the sign-in. Try again shortly."));
       } else if (stage === "totp") {
         // Distinct from the email/password message on purpose: reaching
         // this step already proved the password was correct, so there's

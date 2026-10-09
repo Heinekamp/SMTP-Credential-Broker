@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Switch } from "../../design-system/components";
 import { skeletonBarStyle, tableStyle, tdStyle, thStyle } from "../../design-system/table";
 import { ConfirmModal } from "../../components/ConfirmModal";
-import { ApiError } from "../../lib/apiClient";
+import { ApiError, errorMessage } from "../../lib/apiClient";
 import { listUpstreamAccounts } from "../../lib/api/upstreamAccounts";
 import { deleteSender, deleteSenderPrecheck, listSenders, updateSender, type Sender } from "../../lib/api/senders";
 
@@ -21,10 +21,20 @@ export function SendersList() {
   const [deleteTarget, setDeleteTarget] = useState<Sender | null>(null);
   const [deletePrecheck, setDeletePrecheck] = useState<string[] | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [disableError, setDisableError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const toggleEnabled = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateSender(id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setActionError(null);
+    },
+    onError: (err, { enabled }) => {
+      const message = errorMessage(err, `Could not ${enabled ? "enable" : "disable"} this sender.`);
+      if (enabled) setActionError(message);
+      else setDisableError(message);
+    },
   });
 
   const remove = useMutation({
@@ -46,10 +56,14 @@ export function SendersList() {
   });
 
   async function openDeleteModal(sender: Sender) {
-    const precheck = await deleteSenderPrecheck(sender.id);
-    setDeleteTarget(sender);
-    setDeletePrecheck(precheck.allowed_local_user_names);
-    setDeleteError(null);
+    try {
+      const precheck = await deleteSenderPrecheck(sender.id);
+      setDeleteTarget(sender);
+      setDeletePrecheck(precheck.allowed_local_user_names);
+      setDeleteError(null);
+    } catch (err) {
+      setActionError(errorMessage(err, "Could not check what deleting this sender would affect."));
+    }
   }
 
   const accountById = new Map((upstreamAccounts ?? []).map((a) => [a.id, a]));
@@ -70,6 +84,11 @@ export function SendersList() {
           </Button>
         </div>
       </div>
+      {actionError && (
+        <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 12 }}>
+          {actionError}
+        </div>
+      )}
 
       {isLoading && (
         <Card>
@@ -180,7 +199,11 @@ export function SendersList() {
           confirmLabel="Disable"
           variant="danger"
           confirming={toggleEnabled.isPending}
-          onCancel={() => setDisableTarget(null)}
+          error={disableError}
+          onCancel={() => {
+            setDisableTarget(null);
+            setDisableError(null);
+          }}
           onConfirm={() => {
             toggleEnabled.mutate({ id: disableTarget.id, enabled: false }, { onSuccess: () => setDisableTarget(null) });
           }}
