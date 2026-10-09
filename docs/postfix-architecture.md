@@ -110,8 +110,10 @@ broken_sasl_auth_clients = yes
 
 # ── Sender authorization (the core invariant) ───────────────────────
 smtpd_sender_login_maps = lmdb:/etc/postfix/relay/sender_login
-smtpd_sender_restrictions =
+relay_sender_restrictions =
+    check_sender_access inline:{ { <> = REJECT The null sender is not accepted from authenticated clients } }
     reject_sender_login_mismatch
+smtpd_sender_restrictions = $relay_sender_restrictions
 smtpd_relay_restrictions =
     permit_sasl_authenticated
     reject
@@ -134,6 +136,7 @@ smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = lmdb:/etc/postfix/relay/sasl_passwd
 smtp_sasl_security_options = noanonymous
 relayhost =
+default_transport = error:5.7.1 No upstream route for this sender
 ```
 
 ### Explanation of the non-obvious ones
@@ -163,8 +166,18 @@ relayhost =
   local SMTP username(s) allowed to use it. This is *not* an authentication
   mechanism; it's the authorization table `reject_sender_login_mismatch`
   consults.
-- **`smtpd_sender_restrictions = reject_sender_login_mismatch`** — evaluated
-  at `MAIL FROM` time. `reject_sender_login_mismatch` is shorthand for both
+- **`relay_sender_restrictions`** — a custom parameter holding the sender
+  restriction list, referenced as `$relay_sender_restrictions` by both
+  `smtpd_sender_restrictions` here and the `submission` service's override
+  in `master.cf` (§3), so the two can never drift apart. Its first entry
+  rejects the null sender (`MAIL FROM:<>`): `reject_sender_login_mismatch`
+  doesn't apply to it at all, so without this line any authenticated
+  client could submit with an empty envelope sender and an arbitrary
+  `From:` header (#151, confirmed against real Postfix). Nothing
+  legitimate submits bounces through this relay.
+- **`smtpd_sender_restrictions = $relay_sender_restrictions`** — evaluated
+  at `RCPT TO` time (Postfix's default `smtpd_delay_reject = yes`).
+  `reject_sender_login_mismatch` is shorthand for both
   `reject_authenticated_sender_login_mismatch` (an authenticated client using
   a sender address it doesn't own) and
   `reject_unauthenticated_sender_login_mismatch` (an unauthenticated client
@@ -191,10 +204,20 @@ relayhost =
   looking them up by destination host. This is what makes "credentials
   depend on which mailbox is sending" possible at all.
 - **`sender_dependent_relayhost_maps`** — per-sender override of `relayhost`.
-  Without a sender-specific entry, Postfix would fall back to the global
-  `relayhost` (intentionally left empty here — every sender in this system
-  must have an explicit entry, so a sender with no map entry fails loudly
-  instead of leaking through a default host).
+  Without a sender-specific entry, Postfix falls back to the global
+  `relayhost`, which is empty here. An empty `relayhost` on its own does
+  **not** fail: it means "look up the recipient's MX and deliver directly
+  from this host", with no upstream account at all. Before #151 that is
+  exactly what happened to any sender without an entry.
+- **`default_transport = error:…`** — closes that gap. Every routed sender
+  has an explicit `sender_transport` entry (§4), so the default transport
+  is only reached by mail with no legitimate route, and that mail now
+  bounces instead of going out direct. This includes Postfix's own bounce
+  notices (null sender), which have no upstream account to authenticate
+  as. A sender only gets routing entries while its upstream account is
+  enabled, and `sender_login` applies the same filter, so a sender whose
+  upstream is disabled is rejected at `RCPT TO` rather than reaching this
+  fallback.
 - **`smtp_sasl_password_maps`** — the credentials the outbound `smtp` client
   presents, looked up first by sender (because of
   `smtp_sender_dependent_authentication`), format `key  username:password`.
@@ -214,7 +237,7 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_tls_security_level=encrypt
   -o smtpd_tls_auth_only=yes
   -o smtpd_sasl_auth_enable=yes
-  -o smtpd_sender_restrictions=reject_sender_login_mismatch
+  -o smtpd_sender_restrictions=$relay_sender_restrictions
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject_unauth_destination
   -o milter_macro_daemon_name=ORIGINATING
@@ -280,12 +303,16 @@ pay for."
 `/etc/postfix/relay/sender_transport`:
 
 ```text
+noreply@example.com    smtp:
 printer@example.com    smtp_implicit_tls:
+server@example.com     smtp:
 alerts@example.com     rl_acct7:
 ```
 
-A sender lands here for either of two reasons, and the two never overlap
-for the same account (§10):
+Every routed sender has an entry here, because `default_transport` is an
+error transport (§2): a sender missing from this map bounces. Most use the
+plain `smtp` transport. A sender gets a different transport for either of
+two reasons, and the two never overlap for the same account (§10):
 
 - Its upstream account uses **implicit** TLS (a wrapped port like 465, as
   opposed to STARTTLS on 587) and has **no** rate limit set — routed
