@@ -224,21 +224,59 @@ def _validate_staged_config(main_cf: str, master_cf: str) -> tuple[bool, str]:
         return valid, detail or "postconf: OK"
 
 
-def _install_maps(maps: dict[str, str]) -> None:
-    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+def _stage_maps(maps: dict[str, str], staging_dir: str, main_cf: str) -> None:
+    """Writes every map source into `staging_dir` and builds its database
+    there — a dry run that touches nothing live. Raises on the first
+    postmap failure, so a map that can't be built never leaves a mix of
+    new and old maps live (#191). `postmap -c` reads the staged main.cf
+    instead of the live one, which may not exist yet on first boot."""
+    _write_file(os.path.join(staging_dir, "main.cf"), main_cf, 0o644)
     for name, content in maps.items():
         # `name` is one of _MAP_NAMES (_require_maps) — never a path.
-        source_path = os.path.join(RELAY_MAP_DIR, name)
+        source_path = os.path.join(staging_dir, name)
         mode = 0o600 if name in _SECRET_MAP_NAMES else 0o644
         _write_file(source_path, content, mode)
-        result = _run(["postmap", f"{MAP_TYPE}:{source_path}"])
+        result = _run(["postmap", "-c", staging_dir, f"{MAP_TYPE}:{source_path}"])
         if result.returncode != 0:
             raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
-        # postmap only copies the source's permissions when it *creates*
-        # the database; an existing one (from an earlier version, on the
-        # persistent relay_config volume) is updated in place and keeps its
-        # old mode — 0644 for sasl_passwd.lmdb on every pre-#159 install (#163).
+        # Explicit, not inherited: postmap only copies the source's mode
+        # when it creates the database (#163).
         os.chmod(f"{source_path}.{MAP_TYPE}", mode)
+
+
+def _activate_maps(maps: dict[str, str]) -> None:
+    """Installs maps that _stage_maps already proved will build, by
+    updating the live databases *in place* with postmap. Not a rename of
+    the staged .lmdb: long-running Postfix daemons (trivial-rewrite, smtpd)
+    keep the old file open, and Postfix's change detection checks that
+    open file, so a renamed-over database is never noticed and new
+    senders hit "No upstream route" (found by the integration suite).
+    Routing maps go first and sender_login (authorization) last, so a newly
+    granted sender is never authorized before it has a route; a sender
+    that's authorized but momentarily unrouted bounces (default_transport,
+    #151) rather than leaking."""
+    for name in sorted(maps, key=lambda map_name: map_name == "sender_login"):
+        source_path = os.path.join(RELAY_MAP_DIR, name)
+        mode = 0o600 if name in _SECRET_MAP_NAMES else 0o644
+        _write_file(source_path, maps[name], mode)
+        result = _run(["postmap", "-c", POSTFIX_CONFIG_DIR, f"{MAP_TYPE}:{source_path}"])
+        if result.returncode != 0:
+            raise RuntimeError(f"postmap failed for {name}: {result.stderr.strip()}")
+        # Explicit, not inherited: postmap only copies the source's mode
+        # when it creates the database (#163).
+        os.chmod(f"{source_path}.{MAP_TYPE}", mode)
+
+
+def _install_maps(maps: dict[str, str], main_cf: str = "") -> None:
+    """Dry-run builds every map, then installs them all — _apply_config
+    splits the two halves around installing main.cf."""
+    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix=".staging-", dir=RELAY_MAP_DIR)
+    try:
+        _stage_maps(maps, staging_dir, main_cf)
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    _activate_maps(maps)
 
 
 def _install_config(main_cf: str, master_cf: str) -> dict[str, str | None]:
@@ -284,15 +322,24 @@ def _apply_config(payload: dict) -> dict:
         # nothing on disk is touched when validation fails.
         return {"ok": True, "success": False, "validation_detail": detail, "reloaded": False}
 
+    # All or nothing (#191): every map is first built in a staging
+    # directory as a dry run. Only when they all built does anything live
+    # change — main.cf and master.cf, then each map updated in place. A
+    # postmap failure used to leave the new main.cf and some new maps live
+    # next to old ones.
+    previous_config: dict[str, str | None] | None = None
+    os.makedirs(RELAY_MAP_DIR, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix=".staging-", dir=RELAY_MAP_DIR)
     try:
-        # main.cf must exist on disk before `postmap` runs — it does its
-        # own config lookups and fails outright ("open /etc/postfix/main.cf:
-        # No such file or directory") if main.cf isn't there yet, which is
-        # exactly the state on this container's very first boot before any
-        # config has ever been installed.
+        try:
+            _stage_maps(maps, staging_dir, main_cf)
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
         previous_config = _install_config(main_cf, master_cf)
-        _install_maps(maps)
+        _activate_maps(maps)
     except (OSError, RuntimeError) as exc:
+        if previous_config is not None:
+            _restore_config(previous_config)
         return {"ok": True, "success": False, "validation_detail": f"install failed: {exc}", "reloaded": False}
 
     reloaded = False
