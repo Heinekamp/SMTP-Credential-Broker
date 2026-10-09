@@ -30,6 +30,10 @@ router = APIRouter(
     dependencies=[Depends(get_current_admin)],
 )
 
+# Fields that decide where the stored password gets sent. Changing any of
+# them requires re-entering the password in the same request (#165).
+_DESTINATION_FIELDS = ("host", "port", "username", "tls_mode")
+
 
 def _get_or_404(db: Session, account_id: int) -> UpstreamAccount:
     account = db.get(UpstreamAccount, account_id)
@@ -141,6 +145,19 @@ def update_account(
     account = _get_or_404(db, account_id)
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
+    redirects = [field for field in _DESTINATION_FIELDS if field in data and data[field] != getattr(account, field)]
+    if data.get("tls_skip_verify") is True and not account.tls_skip_verify:
+        redirects.append("tls_skip_verify")
+    if redirects and not password:
+        # The stored password would otherwise be sent to wherever the
+        # account now points — by Test Connection, the scheduled tests, or
+        # Postfix after the next apply — letting any admin session extract
+        # it by pointing the account at a server it controls (#165).
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Re-enter this account's password to change its host, port, username, TLS mode, "
+            "or certificate verification.",
+        )
     for field, value in data.items():
         setattr(account, field, value)
     if password:

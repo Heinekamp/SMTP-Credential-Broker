@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Checkbox, Select, TextInput } from "../../design-system/components";
+import { ApiError } from "../../lib/apiClient";
 import {
   createUpstreamAccount,
   getUpstreamAccount,
@@ -55,6 +56,18 @@ export function UpstreamAccountForm() {
     }
   }
 
+  // Mirrors the API rule (#165): the stored password is only ever sent to the
+  // destination it was entered for, so pointing the account somewhere new —
+  // or switching off certificate verification — needs it re-entered.
+  const destinationChanged =
+    isEdit &&
+    existing !== undefined &&
+    (host !== existing.host ||
+      Number(port) !== existing.port ||
+      username !== existing.username ||
+      tlsMode !== existing.tls_mode ||
+      (tlsSkipVerify && !existing.tls_skip_verify));
+
   const save = useMutation({
     mutationFn: () => {
       const input = {
@@ -73,7 +86,12 @@ export function UpstreamAccountForm() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       navigate("/upstream-accounts");
     },
-    onError: () => setError("Could not save this upstream account. Check the fields and try again."),
+    onError: (err) =>
+      setError(
+        err instanceof ApiError && typeof err.detail === "string"
+          ? err.detail
+          : "Could not save this upstream account. Check the fields and try again.",
+      ),
   });
 
   function submit(e: FormEvent) {
@@ -152,11 +170,20 @@ export function UpstreamAccountForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={fieldStyle}
-          required={!isEdit}
+          required={!isEdit || destinationChanged}
         />
         {isEdit && (
-          <p style={{ color: "var(--text-muted)", fontSize: "var(--text-2xs)", marginTop: -8, marginBottom: 14 }}>
-            This field is write-only and never shows the stored password. Leave blank to keep the current password.
+          <p
+            style={{
+              color: destinationChanged && !password ? "var(--status-armed)" : "var(--text-muted)",
+              fontSize: "var(--text-2xs)",
+              marginTop: -8,
+              marginBottom: 14,
+            }}
+          >
+            {destinationChanged
+              ? "You changed where this account connects, so re-enter its password — the stored one is only ever sent to the destination it was entered for."
+              : "This field is write-only and never shows the stored password. Leave blank to keep the current password."}
           </p>
         )}
 
