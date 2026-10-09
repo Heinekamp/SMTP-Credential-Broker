@@ -28,16 +28,12 @@ RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-se
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Placeholder self-signed cert so smtpd_tls_cert_file/smtpd_tls_key_file
-# (postfix-architecture.md §2) resolve to *something* on first boot —
-# `smtpd_tls_security_level = encrypt` doesn't verify the client's view of
-# this cert, so a self-signed one doesn't break anything, but it is NOT a
-# substitute for a real certificate in production. Mount a real
-# cert/key over these two paths (e.g. from Let's Encrypt) for anything
-# beyond local testing.
-RUN mkdir -p /etc/postfix/tls \
-    && openssl req -x509 -newkey rsa:2048 -keyout /etc/postfix/tls/relay.key -out /etc/postfix/tls/relay.crt \
-        -days 3650 -nodes -subj "/CN=smtp-relay.internal"
+# The placeholder self-signed cert that smtpd_tls_cert_file/key_file
+# (postfix-architecture.md §2) resolve to until a real one is installed is
+# generated per deployment, at first start, by entrypoint.sh — never here.
+# A key generated at build time would ship inside the published image and
+# be shared by every deployment using the placeholder (#173).
+RUN mkdir -p /etc/postfix/tls
 
 # Two real, silent SASL AUTH failures found by testing against a live
 # Postfix instance, neither of which produces an error until an actual

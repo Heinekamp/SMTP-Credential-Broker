@@ -82,7 +82,7 @@ Any service that speaks SMTP with `AUTH` + `STARTTLS` can use this relay.
 The Local SMTP Users screen's **Connection Details** view has the exact
 host/port/username to give it; the password is whatever was shown at
 creation/regeneration time. The relay's own TLS certificate is a
-self-signed placeholder baked into the `postfix` image by default — most
+self-signed placeholder generated for this deployment at first start — most
 real clients (e.g. PHPMailer-based mailers) reject this during STARTTLS.
 Settings → TLS Certificate can provision a real, auto-renewing
 certificate instead, via a Cloudflare API token scoped to

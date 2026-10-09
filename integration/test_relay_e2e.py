@@ -18,6 +18,7 @@ import httpx
 import pytest
 from conftest import (
     COMPOSE_FILE,
+    _compose_exec,
     create_local_user,
     create_sender,
     create_upstream_account,
@@ -74,6 +75,21 @@ def test_invalid_credentials_are_rejected(api: httpx.Client, uid: str) -> None:
             client.login(f"auth-test-user-2-{uid}", "definitely-the-wrong-password")
     finally:
         client.quit()
+
+
+def test_placeholder_tls_key_is_generated_per_deployment(api: httpx.Client) -> None:
+    """Regression test for #173: the placeholder certificate and private key
+    used to be generated at image build time, so every deployment from the
+    published image shared one publicly extractable key. It must now be
+    generated at first start, for this deployment's own submission host,
+    with an owner-only key."""
+    subject = _compose_exec("postfix", "openssl", "x509", "-in", "/etc/postfix/tls/relay.crt", "-noout", "-subject")
+    assert subject.returncode == 0, subject.stderr
+    assert "relay-test.internal" in subject.stdout, subject.stdout
+    key_mode = _compose_exec("postfix", "stat", "-c", "%a", "/etc/postfix/tls/relay.key")
+    assert key_mode.stdout.strip() == "600", key_mode.stdout
+    marker = _compose_exec("postfix", "test", "-e", "/etc/postfix/tls/.placeholder-generated-per-deployment")
+    assert marker.returncode == 0
 
 
 def test_repeated_failed_auth_in_one_session_is_cut_off(api: httpx.Client, uid: str) -> None:

@@ -56,7 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if get_settings().scheduler_enabled:
         # Self-heals the postfix_tls volume from the database (a lost
         # volume or a fresh postfix container otherwise silently falls
-        # back to the Dockerfile-baked placeholder) — it's a no-op until
+        # back to the per-deployment placeholder) — it's a no-op until
         # an admin has actually issued a real certificate, and safe even
         # against a not-yet-ready postfix container
         # (sync_certificate_to_postfix swallows that itself). Gated on
