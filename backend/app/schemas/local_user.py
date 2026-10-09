@@ -2,9 +2,11 @@ import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.common import SingleLineName
+
 
 class LocalUserCreate(BaseModel):
-    name: str
+    name: SingleLineName
     # Restrictive allowlist (not plain str): this username is comma-joined
     # into Postfix's sender_login lookup-map source file
     # (config_generator.py/permissions.py's sender_login_map) alongside a
@@ -27,7 +29,7 @@ class LocalUserCreate(BaseModel):
 
 
 class LocalUserUpdate(BaseModel):
-    name: str | None = None
+    name: SingleLineName | None = None
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
     rate_limit_burst: int | None = Field(default=None, ge=1)

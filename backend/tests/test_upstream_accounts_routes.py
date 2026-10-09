@@ -342,3 +342,24 @@ def test_resubmitting_unchanged_destination_fields_needs_no_password(admin_clien
     )
     assert response.status_code == 200
     assert response.json()["name"] == "Renamed"
+
+
+def test_upstream_password_rejects_separators_and_surrounding_whitespace(admin_client: TestClient) -> None:
+    """Regression test for #175: a newline or tab would inject a record into
+    the sasl_passwd map, and postmap silently trims surrounding whitespace."""
+    for bad in ("pass\nother@corp.com\tu:p", "pa\tss", " leading", "trailing "):
+        response = admin_client.post(
+            "/api/upstream-accounts", json={**PAYLOAD, "password": bad}, headers=csrf_headers(admin_client)
+        )
+        assert response.status_code == 422, bad
+    assert _create(admin_client, password="has inner spaces")["id"]
+
+
+def test_account_names_reject_line_breaks(admin_client: TestClient) -> None:
+    """Names go into alert email subjects, where a CR/LF made every send fail."""
+    response = admin_client.post(
+        "/api/upstream-accounts",
+        json={**PAYLOAD, "name": "evil\r\nBcc: x@example.com"},
+        headers=csrf_headers(admin_client),
+    )
+    assert response.status_code == 422

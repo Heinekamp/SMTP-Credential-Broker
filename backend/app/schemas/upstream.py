@@ -3,6 +3,7 @@ import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TestResult, TlsMode
+from app.schemas.common import SingleLineName, UpstreamPassword
 
 # Hostname (RFC 1123 labels) or IPv4 literal — both config_generator.py's
 # sasl_passwd/sender_relayhost map lines and control_surface.py's actual
@@ -18,12 +19,12 @@ _UPSTREAM_USERNAME_PATTERN = r"^[^\s:]{1,320}$"
 
 
 class UpstreamAccountCreate(BaseModel):
-    name: str
+    name: SingleLineName
     host: str = Field(pattern=_HOST_PATTERN)
     port: int = Field(gt=0, le=65535)
     tls_mode: TlsMode = TlsMode.starttls
     username: str = Field(pattern=_UPSTREAM_USERNAME_PATTERN)
-    password: str = Field(min_length=1)
+    password: UpstreamPassword
     # None = unlimited (today's behavior) — paced, not rejected, by a
     # synthetic per-account Postfix transport (core/config_generator.py).
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
@@ -39,12 +40,12 @@ class UpstreamAccountUpdate(BaseModel):
     the stored password is never pre-filled, never returned, and editing
     without retyping it must not clear it)."""
 
-    name: str | None = None
+    name: SingleLineName | None = None
     host: str | None = Field(default=None, pattern=_HOST_PATTERN)
     port: int | None = Field(default=None, gt=0, le=65535)
     tls_mode: TlsMode | None = None
     username: str | None = Field(default=None, pattern=_UPSTREAM_USERNAME_PATTERN)
-    password: str | None = None
+    password: UpstreamPassword | None = None
     enabled: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=1)
     tls_skip_verify: bool | None = None

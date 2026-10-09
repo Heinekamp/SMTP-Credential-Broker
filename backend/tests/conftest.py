@@ -40,6 +40,15 @@ from app.db.base import Base  # noqa: E402
 from app.main import app  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _reset_anonymous_health_cache() -> None:
+    """api/routes/health.py caches the anonymous report for a few seconds
+    (#175) — module-level state that would otherwise leak between tests."""
+    from app.api.routes import health
+
+    health._anonymous_cache = None
+
+
 @pytest.fixture()
 def db_session() -> Generator[Session, None, None]:
     fd, path = tempfile.mkstemp(suffix=".db")
