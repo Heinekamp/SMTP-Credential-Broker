@@ -241,6 +241,14 @@ values with your own real mailbox details:
    one internal service. Give it a descriptive name (e.g. "Office
    printer"), and grant it permission to use the sender address from
    step 2.
+4. **Click "Apply now"** in the *Pending configuration changes*
+   banner at the top of the page. The mailbox, sender and permission
+   you just added are saved, but Postfix only starts using them once
+   the configuration is applied. This is on purpose, so you can make
+   several changes and switch them on together. You'll see the same
+   banner whenever you change upstream accounts, senders or
+   permissions later; mail keeps flowing under the old rules until you
+   apply.
 
 > [!IMPORTANT]
 > The local SMTP user's password is shown to you **exactly once**,

@@ -76,7 +76,7 @@ account-creation path).
 
 After creating the account you land directly in the dashboard's
 guided-empty state, which walks through the three things every relay
-needs before it can send anything:
+needs before it can send anything, plus the step that makes them live:
 
 1. **Add an upstream account** — the externally-hosted mailbox
    (e.g. a STRATO account) this relay will actually send through.
@@ -85,6 +85,13 @@ needs before it can send anything:
 3. **Create a local SMTP user** — the credential an internal service
    (a printer, InvenTree, a monitoring stack, ...) authenticates with,
    granted permission to use one or more senders.
+4. **Apply the configuration.** New and changed upstream accounts,
+   senders and permissions reach Postfix only when the configuration is
+   applied — a deliberate manual step (architecture.md §5). Until then
+   every page shows a *Pending configuration changes* banner; click
+   **Apply now** in it (or Settings → System → Generate & Apply).
+   Creating, disabling or regenerating a local user is the exception and
+   takes effect at once.
 
 Each local SMTP user's password is shown exactly once, at creation time
 — copy it into the consuming service's configuration immediately; it is
