@@ -43,8 +43,15 @@ broken_sasl_auth_clients = yes
 
 # ── Sender authorization (the core invariant) ───────────────────────
 smtpd_sender_login_maps = lmdb:/etc/postfix/relay/sender_login
-smtpd_sender_restrictions =
+# reject_sender_login_mismatch doesn't apply to the null sender at all,
+# so `MAIL FROM:<>` from any authenticated user would otherwise pass with
+# an arbitrary From: header (#151). Nothing legitimate submits bounces
+# through this relay — refuse it outright. Shared with master.cf's
+# submission service via $relay_sender_restrictions so both stay in step.
+relay_sender_restrictions =
+    check_sender_access inline:{ { <> = REJECT The null sender is not accepted from authenticated clients } }
     reject_sender_login_mismatch
+smtpd_sender_restrictions = $relay_sender_restrictions
 smtpd_relay_restrictions =
     permit_sasl_authenticated
     reject
@@ -77,4 +84,13 @@ sender_dependent_default_transport_maps = lmdb:/etc/postfix/relay/sender_transpo
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = lmdb:/etc/postfix/relay/sasl_passwd
 smtp_sasl_security_options = noanonymous
+# Never deliver directly. An empty relayhost on its own means "look up the
+# recipient's MX and connect to it from this host" — so any sender without
+# a sender_relayhost entry used to go out direct, with no upstream account
+# at all (#151). Every routed sender has an explicit sender_transport
+# entry (config_generator.py), so the default transport is only ever
+# reached by mail that has no legitimate route: it bounces instead. That
+# includes Postfix's own bounce notices (null sender), which have no
+# upstream account they could authenticate as.
 relayhost =
+default_transport = error:5.7.1 No upstream route for this sender

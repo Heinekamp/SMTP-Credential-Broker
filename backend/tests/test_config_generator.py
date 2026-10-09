@@ -96,8 +96,14 @@ def test_build_maps_matches_the_worked_example(db_session: Session) -> None:
     assert "alerts@example.com\tserver@example.com:upstream-secret" in sasl_lines
     assert "server@example.com\tserver@example.com:upstream-secret" in sasl_lines
 
-    # All-STARTTLS example — no sender needs the wrappermode transport.
-    assert maps["sender_transport"] == ""
+    # All-STARTTLS example: every routed sender still gets an explicit
+    # plain-`smtp` entry, since default_transport is an error transport (#151).
+    assert set(maps["sender_transport"].splitlines()) == {
+        "printer@example.com\tsmtp:",
+        "noreply@example.com\tsmtp:",
+        "server@example.com\tsmtp:",
+        "alerts@example.com\tsmtp:",
+    }
 
 
 def test_multiple_users_on_one_sender_are_comma_joined(db_session: Session) -> None:
@@ -140,7 +146,7 @@ def test_implicit_tls_sender_gets_a_sender_transport_entry(db_session: Session) 
     assert maps["sender_transport"].strip() == "printer@example.com\tsmtp_implicit_tls:"
 
 
-def test_starttls_sender_is_absent_from_sender_transport_when_mixed_with_implicit(db_session: Session) -> None:
+def test_starttls_and_implicit_senders_each_get_their_own_transport(db_session: Session) -> None:
     starttls_account = _upstream(db_session, "STRATO starttls", "noreply@example.com")
     implicit_account = _upstream(
         db_session, "STRATO implicit", "printer@example.com", tls_mode=TlsMode.implicit, port=465
@@ -150,7 +156,22 @@ def test_starttls_sender_is_absent_from_sender_transport_when_mixed_with_implici
 
     maps, _ = _build_maps(db_session)
 
-    assert maps["sender_transport"].strip() == "printer@example.com\tsmtp_implicit_tls:"
+    assert maps["sender_transport"].splitlines() == [
+        "noreply@example.com\tsmtp:",
+        "printer@example.com\tsmtp_implicit_tls:",
+    ]
+
+
+def test_generated_config_never_delivers_unrouted_mail_directly(db_session: Session) -> None:
+    """Regression test for #151: with `relayhost =` empty, any sender
+    without a sender_relayhost entry used to be delivered direct-to-MX.
+    The default transport must be an error transport, and the null sender
+    must be refused from authenticated clients on both smtpd services."""
+    main_cf, master_cf = _render_config(db_session)
+    assert "default_transport = error:" in main_cf
+    assert "check_sender_access inline:{ { <> = REJECT" in main_cf
+    assert "smtpd_sender_restrictions = $relay_sender_restrictions" in main_cf
+    assert "-o smtpd_sender_restrictions=$relay_sender_restrictions" in master_cf
 
 
 def test_rate_limited_sender_gets_a_synthetic_transport_entry(db_session: Session) -> None:
