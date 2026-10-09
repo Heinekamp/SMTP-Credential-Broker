@@ -1,7 +1,9 @@
+import { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, Icon } from "../../design-system/components";
+import { ApiError } from "../../lib/apiClient";
 import { getUpstreamAccount, testUpstreamAccountConnection } from "../../lib/api/upstreamAccounts";
 
 // Design handoff §5's Test Connection screen — its own screen, not a
@@ -19,20 +21,25 @@ export function TestConnection() {
     queryFn: () => getUpstreamAccount(accountId),
   });
 
-  const {
-    data: result,
-    isFetching: running,
-    refetch: runTest,
-  } = useQuery({
-    queryKey: ["test-connection", accountId],
-    queryFn: async () => {
-      const response = await testUpstreamAccountConnection(accountId);
-      // The result is persisted server-side onto the account (for the
-      // list/dashboard views) — refresh those caches too.
-      queryClient.invalidateQueries({ queryKey: ["upstream-accounts"] });
-      return response;
-    },
+  // A mutation, not a query: every run is a real login at the upstream
+  // provider. As a query, React Query re-ran it on every window focus
+  // (#203) — only opening the page or clicking Run Test Again should.
+  const test = useMutation({
+    mutationFn: () => testUpstreamAccountConnection(accountId),
+    // The result is persisted server-side onto the account (for the
+    // list/dashboard views) — refresh those caches too.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["upstream-accounts"] }),
   });
+  const result = test.data;
+  const running = test.isPending;
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (!started.current) {
+      started.current = true;
+      test.mutate();
+    }
+  }, [test]);
 
   return (
     <Card style={{ maxWidth: 520 }}>
@@ -46,6 +53,14 @@ export function TestConnection() {
       )}
 
       {running && !result && <p style={{ color: "var(--text-muted)" }}>Running…</p>}
+
+      {test.isError && (
+        <p role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)" }}>
+          {test.error instanceof ApiError && typeof test.error.detail === "string"
+            ? test.error.detail
+            : "Couldn't run the connection test."}
+        </p>
+      )}
 
       {result && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, margin: "12px 0" }}>
@@ -75,7 +90,7 @@ export function TestConnection() {
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button variant="accent" onClick={() => runTest()} disabled={running}>
+        <Button variant="accent" onClick={() => test.mutate()} disabled={running}>
           Run Test Again
         </Button>
         <Button variant="default" onClick={() => navigate("/upstream-accounts")}>
