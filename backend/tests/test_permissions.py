@@ -88,6 +88,18 @@ def test_disabled_local_user_excluded_even_if_granted(db_session: Session) -> No
     assert sender_login_map(db_session) == {}
 
 
+def test_sender_of_disabled_upstream_account_excluded_even_if_granted(db_session: Session) -> None:
+    """Regression test for #151: a sender authorized in sender_login but
+    absent from sender_relayhost (because its upstream account is
+    disabled) had no legitimate route left and went direct-to-MX."""
+    account = _make_upstream(db_session, enabled=False)
+    sender = _make_sender(db_session, account, "printer@example.com")
+    user = _make_user(db_session, "printer-service")
+    grant_permission(db_session, local_smtp_user_id=user.id, sender_id=sender.id, granted_by_admin_id=None)
+
+    assert sender_login_map(db_session) == {}
+
+
 def test_revoke_removes_the_entry(db_session: Session) -> None:
     account = _make_upstream(db_session)
     sender = _make_sender(db_session, account, "printer@example.com")

@@ -22,7 +22,7 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_tls_security_level=encrypt
   -o smtpd_tls_auth_only=yes
   -o smtpd_sasl_auth_enable=yes
-  -o smtpd_sender_restrictions=reject_sender_login_mismatch
+  -o smtpd_sender_restrictions=$relay_sender_restrictions
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject_unauth_destination
   -o milter_macro_daemon_name=ORIGINATING
@@ -55,7 +55,6 @@ relay     unix  -       -       n       -       -       smtp
 smtp_implicit_tls unix  -       -       n       -       -       smtp
   -o syslog_name=postfix/$service_name
   -o smtp_tls_wrappermode=yes
-  -o smtp_tls_security_level=encrypt
 {#- One synthetic transport per rate-limited upstream account (config_generator.py's
    _rate_limited_account_transports) — paces deliveries via
    smtp_destination_rate_delay instead of rejecting anything, so excess
@@ -70,7 +69,6 @@ rl_acct{{ t.account_id }} unix  -       -       n       -       -       smtp
   -o syslog_name=postfix/$service_name
 {%- if t.implicit_tls %}
   -o smtp_tls_wrappermode=yes
-  -o smtp_tls_security_level=encrypt
 {%- endif %}
   -o smtp_destination_rate_delay={{ t.rate_delay_seconds }}s
   -o smtp_destination_concurrency_limit=1

@@ -23,14 +23,23 @@ _ENV = jinja2.Environment(
 )
 
 
+# Where the postfix image's ca-certificates package puts the system trust
+# store — main.cf's smtp_tls_CAfile unless settings.upstream_tls_ca_file
+# overrides it.
+_DEBIAN_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
 def _tab_join(*fields: str) -> str:
     return "\t".join(fields)
 
 
-def _transport_name_for(account: UpstreamAccount) -> str | None:
-    """Which synthetic master.cf transport (if any) a sender using this
-    upstream account must route through — `None` means the default
-    `smtp` transport is fine. A rate limit always wins the naming: an
+def _transport_name_for(account: UpstreamAccount) -> str:
+    """Which master.cf transport a sender using this upstream account must
+    route through — plain `smtp` unless a synthetic one is needed. Every
+    routed sender gets an explicit entry, because main.cf's
+    default_transport is an error transport: anything *without* an entry
+    (an unrouted sender, the null sender) must bounce rather than fall
+    through to direct-to-MX delivery (#151). A rate limit always wins the naming: an
     account needing pacing gets its own `rl_acct{id}` transport (carrying
     wrappermode too, if that account is also implicit-TLS), so it never
     fights over one sender with the shared `smtp_implicit_tls` transport
@@ -40,7 +49,7 @@ def _transport_name_for(account: UpstreamAccount) -> str | None:
         return f"rl_acct{account.id}"
     if account.tls_mode is TlsMode.implicit:
         return "smtp_implicit_tls"
-    return None
+    return "smtp"
 
 
 def _rate_delay_seconds(rate_limit_per_hour: int) -> int:
@@ -76,7 +85,7 @@ def _rate_limited_account_transports(db: Session) -> list[RateLimitedAccountTran
 
 
 def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
-    """Renders the four lookup-map source files
+    """Renders the five lookup-map source files
     (postfix-architecture.md §4) plus a list of human-readable warnings for
     senders that can't currently produce a working map entry (e.g. their
     upstream account is disabled) — an invariant worth surfacing, not
@@ -90,22 +99,27 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
 
     relayhost_lines: list[str] = []
     sasl_passwd_lines: list[str] = []
-    # Only senders whose account needs a non-default transport (implicit
-    # TLS and/or a rate limit) need an entry here — everyone else falls
-    # through to the default `smtp` transport via master.cf.j2's
-    # sender_dependent_default_transport_maps comment.
+    # Every routed sender gets an entry here, including the plain-`smtp`
+    # majority: main.cf's default_transport is an error transport, so a
+    # sender missing from this map bounces instead of being delivered
+    # direct-to-MX (#151).
     sender_transport_lines: list[str] = []
+    # smtp_tls_policy_maps is keyed by nexthop, i.e. per upstream account
+    # (host:port), not per sender — several senders can share one account.
+    # main.cf's default level is `secure` (verify the certificate and the
+    # hostname); only accounts that explicitly opted out get `encrypt`.
+    tls_policy: dict[str, str] = {}
     for sender in enabled_senders_with_upstream(db):
         account = sender.upstream_account
         relayhost_lines.append(_tab_join(sender.address, f"[{account.host}]:{account.port}"))
         password = decrypt_secret(account.encrypted_password)
         sasl_passwd_lines.append(_tab_join(sender.address, f"{account.username}:{password}"))
-        transport_name = _transport_name_for(account)
-        if transport_name is not None:
-            # Empty nexthop after the colon — Postfix still resolves the
-            # actual host:port via sender_dependent_relayhost_maps above,
-            # this only selects which transport handles the sender.
-            sender_transport_lines.append(_tab_join(sender.address, f"{transport_name}:"))
+        # Empty nexthop after the colon — Postfix still resolves the
+        # actual host:port via sender_dependent_relayhost_maps above,
+        # this only selects which transport handles the sender.
+        sender_transport_lines.append(_tab_join(sender.address, f"{_transport_name_for(account)}:"))
+        if account.tls_skip_verify:
+            tls_policy[f"[{account.host}]:{account.port}"] = "encrypt"
 
     all_senders = db.execute(select(Sender)).scalars().all()
     working_addresses = {s.address for s in enabled_senders_with_upstream(db)}
@@ -123,6 +137,7 @@ def _build_maps(db: Session) -> tuple[dict[str, str], list[str]]:
         "sender_relayhost": "\n".join(relayhost_lines) + ("\n" if relayhost_lines else ""),
         "sasl_passwd": "\n".join(sasl_passwd_lines) + ("\n" if sasl_passwd_lines else ""),
         "sender_transport": "\n".join(sender_transport_lines) + ("\n" if sender_transport_lines else ""),
+        "tls_policy": "".join(f"{_tab_join(nexthop, level)}\n" for nexthop, level in sorted(tls_policy.items())),
     }
     return maps, warnings
 
@@ -133,6 +148,7 @@ def _render_config(db: Session) -> tuple[str, str]:
         myhostname=settings.submission_host,
         mydomain=settings.submission_host,
         policy_service_port=settings.policy_service_port,
+        upstream_tls_ca_file=settings.upstream_tls_ca_file or _DEBIAN_CA_BUNDLE,
     )
     master_cf = _ENV.get_template("master.cf.j2").render(
         rate_limited_accounts=_rate_limited_account_transports(db),

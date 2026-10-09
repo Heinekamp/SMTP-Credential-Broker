@@ -9,14 +9,19 @@ from app.models.upstream import UpstreamAccount
 def sender_login_map(db: Session) -> dict[str, list[str]]:
     """address -> local SMTP usernames allowed to use it — exactly the
     content of the generated `smtpd_sender_login_maps` table
-    (postfix-architecture.md §4). Disabled senders and disabled local
-    users are excluded entirely, not just marked; a disabled entity must
-    never appear as an owner in the generated map."""
+    (postfix-architecture.md §4). Disabled senders, disabled local users
+    and senders whose upstream account is disabled are excluded entirely,
+    not just marked; a disabled entity must never appear as an owner in
+    the generated map. The upstream filter matters as much as the other
+    two: a sender that's authorized here but has no sender_relayhost entry
+    has nowhere legitimate to go (#151), so it must not be usable at all —
+    exactly the senders enabled_senders_with_upstream() routes, no more."""
     rows = (
         db.query(Sender.address, LocalSmtpUser.username)
         .join(UserSenderPermission, UserSenderPermission.sender_id == Sender.id)
         .join(LocalSmtpUser, LocalSmtpUser.id == UserSenderPermission.local_smtp_user_id)
-        .filter(Sender.enabled.is_(True), LocalSmtpUser.enabled.is_(True))
+        .join(UpstreamAccount, UpstreamAccount.id == Sender.upstream_account_id)
+        .filter(Sender.enabled.is_(True), LocalSmtpUser.enabled.is_(True), UpstreamAccount.enabled.is_(True))
         .order_by(Sender.address, LocalSmtpUser.username)
         .all()
     )

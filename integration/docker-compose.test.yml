@@ -17,6 +17,7 @@ services:
       dockerfile: backend/Dockerfile
     volumes:
       - relay_config_test:/shared-config:ro
+      - upstream_ca_test:/upstream-ca:ro
     environment:
       RELAY_DATABASE_URL: sqlite:////data/app.db
       RELAY_COOKIE_SECURE: "false"
@@ -25,6 +26,10 @@ services:
       RELAY_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
       RELAY_SUBMISSION_HOST: relay-test.internal
+      # Trust the upstream stub's self-signed certificate (published by the
+      # stub into upstream_ca_test) the way a real deployment trusts a
+      # public CA, so the suite exercises verified upstream TLS (#153).
+      RELAY_UPSTREAM_TLS_CA_FILE: /upstream-ca/stub.crt
     ports:
       - "8000:8000"
     depends_on:
@@ -45,6 +50,7 @@ services:
       # real volume-backed behavior, not just the code path, to actually
       # prove anything.
       - postfix_queue_test:/var/spool/postfix
+      - upstream_ca_test:/upstream-ca:ro
     environment:
       RELAY_SUBMISSION_HOST: relay-test.internal
     ports:
@@ -54,6 +60,14 @@ services:
   upstream-stub:
     build:
       context: ./upstream_stub
+    volumes:
+      - upstream_ca_test:/upstream-ca
+    networks:
+      default:
+        # Same server, reached under a name its certificate doesn't cover —
+        # for the hostname-verification tests (#153).
+        aliases:
+          - upstream-stub-mismatch
     ports:
       - "2526:2526" # inspection HTTP API for the test suite
 
@@ -61,3 +75,4 @@ volumes:
   relay_config_test:
   sasldb_test:
   postfix_queue_test:
+  upstream_ca_test:

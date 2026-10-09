@@ -242,6 +242,107 @@ def test_permission_change_takes_effect_after_regeneration(api: httpx.Client, st
     assert _wait_for_delivery(lambda d: d["mail_from"] == alerts_address) is not None
 
 
+def test_null_sender_from_authenticated_user_is_rejected(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for #151: `reject_sender_login_mismatch` doesn't
+    apply to the null sender, and with `relayhost =` empty an unrouted
+    `MAIL FROM:<>` would go straight to the recipient's MX from the relay's
+    own IP — bypassing both sender authorization and every upstream
+    account. Any authenticated local user, even one with no grants at all,
+    must be refused."""
+    _, password = create_local_user(api, name="Null Sender Test", username=f"null-sender-{uid}")
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"null-sender-{uid}", password)
+    client.mail("")  # MAIL FROM:<>; sender restrictions are evaluated at RCPT
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code >= 500, f"expected the null sender to be rejected, got {rcpt_code} {rcpt_msg!r}"
+    client.rset()
+    client.quit()
+
+
+def test_sender_of_disabled_upstream_account_is_rejected(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for #151: disabling an upstream account used to drop
+    its senders only from the routing maps, not from sender_login — so the
+    local users granted those senders could still send as them, and with
+    no relayhost entry left the mail went direct-to-MX instead of failing.
+    Disabling the account must make its senders unusable."""
+    address = f"disabled-upstream-{uid}@example.com"
+    account_id = create_upstream_account(
+        api, name="To be disabled", username="server@example.com", password="server-upstream-pass"
+    )
+    sender_id = create_sender(api, address=address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="Disabled Upstream", username=f"disabled-upstream-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"disabled-upstream-{uid}", password)
+    client.sendmail(address, ["dest@example.net"], "Subject: t\n\nb")
+    client.quit()
+    assert _wait_for_delivery(lambda d: d["mail_from"] == address) is not None
+
+    api.patch(f"/api/upstream-accounts/{account_id}", json={"enabled": False}).raise_for_status()
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"disabled-upstream-{uid}", password)
+    mail_code, _ = client.mail(address)
+    assert mail_code == 250
+    rcpt_code, rcpt_msg = client.rcpt("dest@example.net")
+    assert rcpt_code == 553, f"expected rejection once the upstream is disabled, got {rcpt_code} {rcpt_msg!r}"
+    client.rset()
+    client.quit()
+
+
+def _send_via_mismatched_upstream(api: httpx.Client, uid: str, *, tls_skip_verify: bool) -> str:
+    """Routes a fresh sender through the `upstream-stub-mismatch` alias —
+    the same stub server, under a name its certificate doesn't cover — and
+    submits one message. Returns the sender address."""
+    address = f"tls-{'skip' if tls_skip_verify else 'verify'}-{uid}@example.com"
+    account_id = create_upstream_account(
+        api,
+        name=f"Mismatched host ({'skip' if tls_skip_verify else 'verify'})",
+        username="alerts@example.com",
+        password="alerts-upstream-pass",
+        host="upstream-stub-mismatch",
+        tls_skip_verify=tls_skip_verify,
+    )
+    sender_id = create_sender(api, address=address, upstream_account_id=account_id)
+    user_id, password = create_local_user(api, name="TLS Verify Test", username=f"tls-user-{uid}")
+    grant(api, user_id=user_id, sender_id=sender_id)
+    push_config(api)
+
+    client = _connect_submission()
+    client.login(f"tls-user-{uid}", password)
+    client.sendmail(address, ["dest@example.net"], "Subject: t\n\nb")
+    client.quit()
+    return address
+
+
+def test_upstream_certificate_hostname_mismatch_is_not_delivered(api: httpx.Client, stub: None, uid: str) -> None:
+    """Regression test for #153: with smtp_tls_security_level=encrypt,
+    Postfix completed TLS with any certificate and sent AUTH PLAIN with the
+    real upstream password. A certificate that doesn't match the upstream
+    host must stop delivery — the message stays deferred in the queue."""
+    address = _send_via_mismatched_upstream(api, uid, tls_skip_verify=False)
+
+    assert _wait_for_delivery(lambda d: d["mail_from"] == address, timeout=8.0) is None
+    queued = [e for e in api.get("/api/queue").json() if e["sender"] == address]
+    assert queued, "expected the message to be deferred in the queue"
+    reasons = " ".join(r["delay_reason"] or "" for r in queued[0]["recipients"])
+    assert "certificate" in reasons.lower() or "tls" in reasons.lower(), reasons
+    api.delete(f"/api/queue/{queued[0]['queue_id']}").raise_for_status()
+
+
+def test_upstream_certificate_check_can_be_skipped_per_account(api: httpx.Client, stub: None, uid: str) -> None:
+    """The per-account opt-out (#153) for providers whose certificate
+    doesn't match their hostname: the same mismatched upstream delivers
+    once tls_skip_verify is on, still over TLS (encrypt, not none)."""
+    address = _send_via_mismatched_upstream(api, uid, tls_skip_verify=True)
+    assert _wait_for_delivery(lambda d: d["mail_from"] == address) is not None
+
+
 def test_open_relay_is_prevented_without_authentication(api: httpx.Client) -> None:
     # Deliberately the submission port (587), not plain smtp (25): port 25
     # is bound loopback-only by design (postfix-architecture.md §3) and

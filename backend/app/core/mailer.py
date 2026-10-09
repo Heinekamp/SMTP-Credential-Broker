@@ -35,11 +35,12 @@ def send_alert_email(
         host=upstream_account.host,
         port=upstream_account.port,
         tls_mode=upstream_account.tls_mode,
+        skip_verify=upstream_account.tls_skip_verify,
         timeout=DEFAULT_TIMEOUT,
     )
     try:
         if upstream_account.tls_mode is not TlsMode.implicit:
-            smtp_transport.upgrade_to_starttls(client)
+            smtp_transport.upgrade_to_starttls(client, skip_verify=upstream_account.tls_skip_verify)
         client.login(upstream_account.username, password)
 
         message = EmailMessage()

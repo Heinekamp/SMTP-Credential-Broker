@@ -78,6 +78,7 @@ One row per externally-hosted SMTP account (a STRATO mailbox, etc.).
 | `last_test_result` | enum: `unknown`, `success`, `failure`, nullable | |
 | `last_test_error` | text, nullable | human-readable diagnostic only — never contains the password |
 | `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Paces outbound delivery via a synthetic per-account Postfix transport rather than rejecting anything — postfix-architecture.md §10. |
+| `tls_skip_verify` | boolean, default `false` | Opt-out of upstream certificate verification. `false` (default) = the provider's certificate must be valid for `host`. `true` = encrypted but unauthenticated, rendered as an `encrypt` entry in the `tls_policy` map (postfix-architecture.md §2, §4). |
 | `created_at` / `updated_at` | timestamp | |
 
 `encrypted_password` is **never** included in any API response schema, at

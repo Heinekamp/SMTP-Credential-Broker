@@ -58,6 +58,7 @@ def test_upstream_connection(
     tls_mode: TlsMode,
     username: str,
     password: str,
+    tls_skip_verify: bool = False,
     timeout: float = DEFAULT_TIMEOUT,
     resolver: Resolver = socket.getaddrinfo,
     client_factory: ClientFactory | None = None,
@@ -77,7 +78,12 @@ def test_upstream_connection(
 
     try:
         client, greeting_detail = smtp_transport.connect_and_greet(
-            host=host, port=port, tls_mode=tls_mode, timeout=timeout, client_factory=client_factory
+            host=host,
+            port=port,
+            tls_mode=tls_mode,
+            skip_verify=tls_skip_verify,
+            timeout=timeout,
+            client_factory=client_factory,
         )
     except ssl.SSLError as exc:
         # Implicit-TLS connect() does TCP + TLS together — a socket-level
@@ -108,7 +114,7 @@ def test_upstream_connection(
     else:
         results["Server greeting"] = StepResult("Server greeting", True, greeting_detail)
         try:
-            tls_detail = smtp_transport.upgrade_to_starttls(client)
+            tls_detail = smtp_transport.upgrade_to_starttls(client, skip_verify=tls_skip_verify)
         except (smtplib.SMTPException, ssl.SSLError, OSError, ValueError) as exc:
             # ssl.SSLError covers real handshake/certificate failures;
             # ValueError/OSError cover lower-level failures smtplib doesn't

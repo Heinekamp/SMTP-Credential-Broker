@@ -16,6 +16,7 @@ from collections.abc import Callable
 from email.message import EmailMessage
 from typing import Protocol
 
+from app.config import get_settings
 from app.models.enums import TlsMode
 
 
@@ -37,9 +38,27 @@ class SmtpClient(Protocol):
 ClientFactory = Callable[[float], SmtpClient]
 
 
-def default_client_factory(tls_mode: TlsMode) -> ClientFactory:
-    cls = smtplib.SMTP_SSL if tls_mode is TlsMode.implicit else smtplib.SMTP
-    return lambda timeout: cls(timeout=timeout)
+def tls_context(*, skip_verify: bool) -> ssl.SSLContext:
+    """The context for every app-side TLS session with an upstream server.
+    Verifies the certificate chain (against settings.upstream_tls_ca_file
+    if set, otherwise the system trust store — matching Postfix's
+    smtp_tls_CAfile either way) and the hostname
+    unless the account has explicitly opted out — an unverified session
+    would hand the upstream password to anyone able to intercept it."""
+    context = ssl.create_default_context(cafile=get_settings().upstream_tls_ca_file)
+    if skip_verify:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def default_client_factory(tls_mode: TlsMode, *, skip_verify: bool) -> ClientFactory:
+    if tls_mode is TlsMode.implicit:
+        # smtplib.SMTP_SSL with no context= falls back to
+        # ssl._create_stdlib_context(), which verifies nothing at all.
+        context = tls_context(skip_verify=skip_verify)
+        return lambda timeout: smtplib.SMTP_SSL(timeout=timeout, context=context)
+    return lambda timeout: smtplib.SMTP(timeout=timeout)
 
 
 def decode(message: bytes) -> str:
@@ -51,6 +70,7 @@ def connect_and_greet(
     host: str,
     port: int,
     tls_mode: TlsMode,
+    skip_verify: bool,
     timeout: float,
     client_factory: ClientFactory | None = None,
 ) -> tuple[SmtpClient, str]:
@@ -59,7 +79,7 @@ def connect_and_greet(
     ssl.SSLError here means TCP succeeded and TLS failed; an OSError means
     TCP itself never established; a smtplib.SMTPConnectError means TCP
     (and, for implicit TLS, TLS) succeeded but the greeting was bad."""
-    factory = client_factory or default_client_factory(tls_mode)
+    factory = client_factory or default_client_factory(tls_mode, skip_verify=skip_verify)
     client = factory(timeout)
     # smtplib only sets `_host` (which starttls() needs for TLS SNI/hostname
     # verification) when a host is passed to the constructor itself, not
@@ -71,13 +91,13 @@ def connect_and_greet(
     return client, f"{code} {decode(message)}"
 
 
-def upgrade_to_starttls(client: SmtpClient) -> str:
+def upgrade_to_starttls(client: SmtpClient, *, skip_verify: bool) -> str:
     """EHLO/STARTTLS/EHLO for a STARTTLS (non-implicit-TLS) account —
     returns the decoded STARTTLS response. Raises on any failure
     (smtplib.SMTPException, ssl.SSLError, OSError, or ValueError for a
     lower-level failure smtplib doesn't wrap, e.g. a bad server_hostname)."""
     client.ehlo()
-    tls_code, tls_message = client.starttls(context=ssl.create_default_context())
+    tls_code, tls_message = client.starttls(context=tls_context(skip_verify=skip_verify))
     client.ehlo()
     return f"{tls_code} {decode(tls_message)}"
 
