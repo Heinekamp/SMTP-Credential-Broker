@@ -1,0 +1,132 @@
+name: Bug report
+description: Something isn't working the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Security vulnerabilities must not be reported here.** Use
+        [private vulnerability reporting](https://github.com/Heinekamp/SMTP-Credential-Broker/security/advisories/new)
+        instead (see [SECURITY.md](https://github.com/Heinekamp/SMTP-Credential-Broker/blob/main/SECURITY.md)).
+
+        It's also worth checking the
+        [troubleshooting guide](https://github.com/Heinekamp/SMTP-Credential-Broker/blob/main/docs/troubleshooting.md)
+        first. It covers the most common startup, encryption, login and
+        sending problems.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem, including any error message shown in the UI or returned by a mail client.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that triggers the problem.
+      placeholder: |
+        1. Go to Settings → …
+        2. Click …
+        3. Send a test message as local user … through …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown at the bottom of the sidebar in the web UI (for example `v0.3.3`), or the image tag / git tag you deployed.
+      placeholder: v0.3.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Pick whichever fits best. Choose more than one if unsure.
+      multiple: true
+      options:
+        - Installation / upgrade / startup
+        - Web UI / login / TOTP
+        - Upstream accounts
+        - Senders / sender permissions
+        - Local SMTP users / credentials
+        - Rate limiting / abuse detection
+        - Sending / relaying mail (Postfix)
+        - TLS certificate (Let's Encrypt, DNS-01)
+        - Mail log
+        - Alerts / email notifications
+        - Backup / restore / encryption key
+        - CLI (`relay …`)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment environment
+      description: Anything about how this instance is run that might matter.
+      value: |
+        - Host OS:
+        - Docker / Docker Compose version (`docker compose version`):
+        - Reverse proxy in front of the web UI (none / nginx / Caddy / Traefik / …):
+        - Submission TLS certificate (self-signed placeholder / Let's Encrypt via Cloudflare / Let's Encrypt via manual DNS-01 / mounted certificate):
+        - Upstream provider(s) involved, if relevant (e.g. STRATO, Gmail):
+        - Any `docker-compose.override.yml` or non-default environment settings:
+    validations:
+      required: false
+
+  - type: textarea
+    id: health
+    attributes:
+      label: Health check output
+      description: The output of `curl http://<host>:<port>/api/health`, if the app is running.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Output of `docker compose logs app` and/or `docker compose logs postfix` from around the time of the problem.
+        If it's a web UI/API error, include the `X-Request-ID` response header from your browser's dev tools. Every log line from that request carries the same ID.
+        **Check for secrets before pasting**, such as passwords, API tokens, TOTP secrets and encryption keys.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, workarounds you've found, or when this started (for example after upgrading from a specific version).
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I've removed passwords, API tokens, TOTP secrets and encryption keys from everything above.
+          required: true
+        - label: This is not a security vulnerability. Those go through private vulnerability reporting instead.
+          required: true
+        - label: I've searched existing issues for this problem.
+          required: false
