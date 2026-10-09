@@ -297,7 +297,8 @@ def test_changing_the_destination_requires_the_password(admin_client: TestClient
     running Test Connection used to send the *stored* password there,
     letting any admin session extract it."""
     created = _create(admin_client)
-    for change in ({"host": "attacker.example"}, {"port": 2525}, {"username": "x@example.com"}, {"tls_mode": "implicit"}):
+    changes = ({"host": "attacker.example"}, {"port": 2525}, {"username": "x@example.com"}, {"tls_mode": "implicit"})
+    for change in changes:
         response = _patch(admin_client, created["id"], change)
         assert response.status_code == 422, change
         assert "Re-enter this account's password" in response.json()["detail"]
