@@ -286,3 +286,58 @@ def test_test_connection_persists_result(admin_client: TestClient, db_session: S
     assert row.last_test_result == "failure"
     assert row.last_test_at is not None
     assert "AUTH" in row.last_test_error
+
+
+def _patch(client: TestClient, account_id: int, body: dict):
+    return client.patch(f"/api/upstream-accounts/{account_id}", json=body, headers=csrf_headers(client))
+
+
+def test_changing_the_destination_requires_the_password(admin_client: TestClient, db_session: Session) -> None:
+    """Regression test for #165: pointing an account at a new host and then
+    running Test Connection used to send the *stored* password there,
+    letting any admin session extract it."""
+    created = _create(admin_client)
+    for change in ({"host": "attacker.example"}, {"port": 2525}, {"username": "x@example.com"}, {"tls_mode": "implicit"}):
+        response = _patch(admin_client, created["id"], change)
+        assert response.status_code == 422, change
+        assert "Re-enter this account's password" in response.json()["detail"]
+
+    db_session.expire_all()
+    assert db_session.get(UpstreamAccount, created["id"]).host == "smtp.strato.de"
+
+
+def test_changing_the_destination_with_the_password_succeeds(admin_client: TestClient) -> None:
+    created = _create(admin_client)
+    response = _patch(admin_client, created["id"], {"host": "mail.example.com", "password": "new-secret"})
+    assert response.status_code == 200
+    assert response.json()["host"] == "mail.example.com"
+
+
+def test_switching_off_certificate_verification_requires_the_password(admin_client: TestClient) -> None:
+    created = _create(admin_client)
+    assert _patch(admin_client, created["id"], {"tls_skip_verify": True}).status_code == 422
+    assert _patch(admin_client, created["id"], {"tls_skip_verify": True, "password": "pw"}).status_code == 200
+    # Switching verification back on only tightens things, so no password needed.
+    assert _patch(admin_client, created["id"], {"tls_skip_verify": False}).status_code == 200
+
+
+def test_resubmitting_unchanged_destination_fields_needs_no_password(admin_client: TestClient) -> None:
+    """The edit form always sends every field — saving a rename or a rate
+    limit change mustn't demand the password when nothing about the
+    destination actually changed."""
+    created = _create(admin_client)
+    response = _patch(
+        admin_client,
+        created["id"],
+        {
+            "name": "Renamed",
+            "host": "smtp.strato.de",
+            "port": 587,
+            "username": "noreply@example.com",
+            "tls_mode": "starttls",
+            "tls_skip_verify": False,
+            "rate_limit_per_hour": 50,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "Renamed"
