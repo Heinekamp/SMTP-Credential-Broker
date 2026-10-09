@@ -225,12 +225,12 @@ export function TlsCertificateTab() {
 
         <div style={rowStyle}>
           <span style={{ fontSize: "var(--text-sm)" }}>Enable Let's Encrypt</span>
-          <Switch checked={enabled} onChange={setEnabled} />
+          <Switch ariaLabel="Enable Let's Encrypt" checked={enabled} onChange={setEnabled} />
         </div>
 
         <div style={{ marginTop: 12 }}>
           <div style={fieldLabelStyle}>Domain</div>
-          <TextInput
+          <TextInput aria-label="Domain"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
             placeholder="smtp-relay.example.com"
@@ -243,7 +243,7 @@ export function TlsCertificateTab() {
           </p>
 
           <div style={fieldLabelStyle}>Contact email (optional)</div>
-          <TextInput
+          <TextInput aria-label="Contact email (optional)"
             value={contactEmail}
             onChange={(e) => setContactEmail(e.target.value)}
             placeholder="ops@example.com"
@@ -251,7 +251,7 @@ export function TlsCertificateTab() {
           />
 
           <div style={fieldLabelStyle}>DNS Provider</div>
-          <Select
+          <Select aria-label="DNS Provider"
             value={dnsProvider}
             onChange={(e) => setDnsProvider(e.target.value === "manual" ? "manual" : "cloudflare")}
             style={{ width: "100%", marginBottom: 12 }}
@@ -263,7 +263,7 @@ export function TlsCertificateTab() {
           {dnsProvider === "cloudflare" ? (
             <>
               <div style={fieldLabelStyle}>Cloudflare API Token</div>
-              <TextInput
+              <TextInput aria-label="Cloudflare API Token"
                 type="password"
                 value={apiToken}
                 onChange={(e) => setApiToken(e.target.value)}
@@ -276,7 +276,7 @@ export function TlsCertificateTab() {
               </p>
 
               <div style={fieldLabelStyle}>Cloudflare Zone ID (optional)</div>
-              <TextInput
+              <TextInput aria-label="Cloudflare Zone ID (optional)"
                 value={zoneId}
                 onChange={(e) => setZoneId(e.target.value)}
                 placeholder="Auto-detected from the domain if left blank"

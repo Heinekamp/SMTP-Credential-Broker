@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
-import { Button, Card } from "../design-system/components";
+import { Button } from "../design-system/components";
+import { ModalFrame } from "./ModalFrame";
 
 export interface ConfirmModalProps {
   title: string;
@@ -37,41 +38,28 @@ export function ConfirmModal({
   confirmDisabled = false,
 }: ConfirmModalProps) {
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
-    >
-      <Card style={{ width: "100%", maxWidth: 440, padding: 24 }}>
-        <h2 style={{ margin: "0 0 12px", fontSize: "var(--text-md)", fontWeight: 600 }}>{title}</h2>
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginBottom: 20, lineHeight: "var(--leading-normal)" }}>
-          {body}
+    <ModalFrame title={title} onClose={onCancel}>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", marginBottom: 20, lineHeight: "var(--leading-normal)" }}>
+        {body}
+      </div>
+      {error && (
+        <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 16 }}>
+          {error}
         </div>
-        {error && (
-          <div role="alert" style={{ color: "var(--status-fault)", fontSize: "var(--text-sm)", marginBottom: 16 }}>
-            {error}
-          </div>
-        )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button variant="default" onClick={onCancel} disabled={confirming}>
-            Cancel
-          </Button>
-          <Button
-            variant={variant}
-            onClick={onConfirm}
-            disabled={confirming || confirmDisabled}
-            title={confirmDisabled ? "See above — this can't be deleted right now" : undefined}
-          >
-            {confirmLabel}
-          </Button>
-        </div>
-      </Card>
-    </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Button variant="default" onClick={onCancel} disabled={confirming}>
+          Cancel
+        </Button>
+        <Button
+          variant={variant}
+          onClick={onConfirm}
+          disabled={confirming || confirmDisabled}
+          title={confirmDisabled ? "See above — this can't be deleted right now" : undefined}
+        >
+          {confirmLabel}
+        </Button>
+      </div>
+    </ModalFrame>
   );
 }

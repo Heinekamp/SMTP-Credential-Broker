@@ -2,15 +2,19 @@ export interface SwitchProps {
   checked?: boolean;
   onChange?: (checked: boolean) => void;
   disabled?: boolean;
+  /** Accessible name — the visible text beside a switch isn't associated
+   * with it, so without this a screen reader announces just "switch". */
+  ariaLabel?: string;
 }
 
 // Ported from design-system/components-reference/core/switch/Switch.jsx.
-export function Switch({ checked, onChange, disabled }: SwitchProps) {
+export function Switch({ checked, onChange, disabled, ariaLabel }: SwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange && onChange(!checked)}
       style={{

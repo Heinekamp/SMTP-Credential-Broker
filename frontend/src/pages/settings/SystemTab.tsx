@@ -161,7 +161,7 @@ export function SystemTab() {
           until you set a window here.
         </p>
         <div style={fieldLabelStyle}>Mail Log</div>
-        <Select
+        <Select aria-label="Mail Log"
           value={mailLogRetention}
           onChange={(e) => setMailLogRetention(e.target.value)}
           style={{ width: "100%", marginBottom: 12 }}
@@ -173,7 +173,7 @@ export function SystemTab() {
           ))}
         </Select>
         <div style={fieldLabelStyle}>Audit Log</div>
-        <Select
+        <Select aria-label="Audit Log"
           value={auditLogRetention}
           onChange={(e) => setAuditLogRetention(e.target.value)}
           style={{ width: "100%", marginBottom: 16 }}

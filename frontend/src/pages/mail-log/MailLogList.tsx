@@ -82,6 +82,7 @@ export function MailLogList() {
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <Select
+          aria-label="Filter by status"
           value={status}
           onChange={(e) => resetAndFilter(() => setStatus(e.target.value as MailStatus | "all"))}
         >

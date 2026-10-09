@@ -79,11 +79,13 @@ export function AppearanceTab() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <input
             type="color"
+            aria-label="Accent color picker"
             value={isValidHex ? accentColor : DEFAULT_ACCENT}
             onChange={(e) => setAccentColor(e.target.value)}
             style={{ width: 40, height: 32, padding: 0, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)" }}
           />
           <TextInput
+            aria-label="Accent color (hex)"
             value={accentColor}
             onChange={(e) => setAccentColor(e.target.value)}
             placeholder={DEFAULT_ACCENT}

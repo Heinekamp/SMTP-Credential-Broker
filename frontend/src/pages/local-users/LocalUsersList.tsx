@@ -24,12 +24,14 @@ const QUERY_KEY = ["local-users"];
 function InlineNumberField({
   currentValue,
   placeholder,
+  label,
   disabled,
   saving,
   onSave,
 }: {
   currentValue: number | null;
   placeholder: string;
+  label: string;
   disabled?: boolean;
   saving: boolean;
   onSave: (value: number | null) => void;
@@ -60,6 +62,7 @@ function InlineNumberField({
       type="number"
       min={1}
       placeholder={placeholder}
+      aria-label={label}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={commit}
@@ -88,6 +91,7 @@ function RateLimitCell({
         <InlineNumberField
           currentValue={user.rate_limit_per_hour}
           placeholder="Unlimited"
+          label={`Hourly rate limit: ${user.username}`}
           saving={savingHourly}
           onSave={onSaveHourly}
         />
@@ -101,6 +105,7 @@ function RateLimitCell({
         <InlineNumberField
           currentValue={user.rate_limit_burst}
           placeholder="No burst limit"
+          label={`Burst limit: ${user.username}`}
           disabled={user.rate_limit_per_hour === null}
           saving={savingBurst}
           onSave={onSaveBurst}
@@ -275,6 +280,7 @@ export function LocalUsersList() {
                 </td>
                 <td style={tdStyle}>
                   <Switch
+                    ariaLabel={`Enabled: ${user.username}`}
                     checked={user.enabled}
                     onChange={(checked) => {
                       setDisableError(null);

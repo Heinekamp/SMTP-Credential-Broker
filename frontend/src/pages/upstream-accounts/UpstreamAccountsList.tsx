@@ -155,6 +155,7 @@ export function UpstreamAccountsList() {
                   <td style={tdStyle}>{tlsLabel(account)}</td>
                   <td style={tdStyle}>
                     <Switch
+                      ariaLabel={`Enabled: ${account.name}`}
                       checked={account.enabled}
                       onChange={(checked) => {
                         if (checked) {
