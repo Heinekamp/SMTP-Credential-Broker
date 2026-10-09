@@ -269,7 +269,7 @@ def test_sender_of_disabled_upstream_account_is_rejected(api: httpx.Client, stub
     Disabling the account must make its senders unusable."""
     address = f"disabled-upstream-{uid}@example.com"
     account_id = create_upstream_account(
-        api, name="To be disabled", username="disabled@example.com", password="disabled-upstream-pass"
+        api, name="To be disabled", username="server@example.com", password="server-upstream-pass"
     )
     sender_id = create_sender(api, address=address, upstream_account_id=account_id)
     user_id, password = create_local_user(api, name="Disabled Upstream", username=f"disabled-upstream-{uid}")
