@@ -742,16 +742,8 @@ def test_a_successful_apply_activates_every_map_with_sender_login_last(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     config_dir, map_dir = _setup_live(monkeypatch, tmp_path)
-    monkeypatch.setattr(control_surface, "_run", _fake_postmap())
-    activated: list[str] = []
-    real_replace = control_surface.os.replace
-
-    def recording_replace(src, dst):
-        if str(dst).startswith(str(map_dir)) and not str(dst).endswith(".lmdb"):
-            activated.append(Path(dst).name)
-        return real_replace(src, dst)
-
-    monkeypatch.setattr(control_surface.os, "replace", recording_replace)
+    built: list[str] = []
+    monkeypatch.setattr(control_surface, "_run", _fake_postmap(built=built))
 
     result = control_surface._apply_config(
         {
@@ -768,6 +760,8 @@ def test_a_successful_apply_activates_every_map_with_sender_login_last(
     for name, content in expected.items():
         assert (map_dir / name).read_text(encoding="utf-8") == content
         assert (map_dir / f"{name}.lmdb").read_text(encoding="utf-8") == f"db:{name}"
-    map_activations = [name for name in activated if name in ("sender_login", "sender_relayhost", "sasl_passwd")]
-    assert map_activations[-1] == "sender_login"
+    # The first three postmap runs are the staged dry run; the last three
+    # update the live maps in place — sender_login last.
+    assert len(built) == 6
+    assert built[-1] == "sender_login"
     assert [p.name for p in map_dir.iterdir() if p.name.startswith(".staging-")] == []

@@ -130,15 +130,17 @@ Validation PASSES
         │
         ▼
 Atomic install (all or nothing, #191)
-   - every map source is written to a staging directory inside the map
-     directory and built there (`postmap -c <staging>`, so it reads the
-     staged main.cf, not the live one). Any failure stops here, with
-     nothing live touched
+   - every map source is first written to a staging directory and built
+     there as a dry run (`postmap -c <staging>`, reading the staged
+     main.cf, not the live one). Any failure stops here, with nothing
+     live touched
    - only then are main.cf/master.cf written to a temp file and
      rename(2)'d over the live files
-   - then the staged maps (source + `.lmdb`) are renamed into place:
-     routing maps first, `sender_login` last. A failure at this stage
-     restores the previous main.cf/master.cf
+   - then each live map is updated in place with `postmap`: routing maps
+     first, `sender_login` last. In place, not by renaming the staged
+     `.lmdb` over it — running Postfix daemons keep the old file open and
+     would never notice a replaced one. A failure at this stage restores
+     the previous main.cf/master.cf
         │
         ▼
 Apply
