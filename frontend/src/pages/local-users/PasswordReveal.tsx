@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { Button, Card, Icon } from "../../design-system/components";
@@ -13,15 +13,27 @@ import { copyToClipboard } from "../../lib/clipboard";
 export function PasswordReveal() {
   const navigate = useNavigate();
   const location = useLocation();
-  const password = (location.state as { password?: string } | null)?.password;
+  // Captured once into component state, then scrubbed from the history
+  // entry it arrived in. React Router keeps navigation state in
+  // window.history.state, which survives Back/Forward and reloads and is
+  // persisted to disk for session restore — so leaving it there meant the
+  // "shown once" password could be brought back from history (#201).
+  const [password] = useState(() => (location.state as { password?: string } | null)?.password);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (location.state) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   function copy() {
     setCopyState(copyToClipboard(password ?? "") ? "copied" : "failed");
   }
 
   if (!password) {
-    // A hard refresh loses navigation state — the password was never
+    // Reached by reloading or going Back/Forward to this page: the
+    // password was scrubbed from history on first display and was never
     // stored anywhere it could be re-fetched from (security-model.md §5),
     // so this is the honest outcome, not a bug to work around.
     return (
@@ -74,7 +86,7 @@ export function PasswordReveal() {
         </p>
       )}
 
-      <Button variant="accent" onClick={() => navigate("/local-users")}>
+      <Button variant="accent" onClick={() => navigate("/local-users", { replace: true })}>
         Done
       </Button>
     </Card>
