@@ -148,6 +148,7 @@ def _render_config(db: Session) -> tuple[str, str]:
         myhostname=settings.submission_host,
         mydomain=settings.submission_host,
         policy_service_port=settings.policy_service_port,
+        submission_auth_rate_limit_per_minute=settings.submission_auth_rate_limit_per_minute,
         upstream_tls_ca_file=settings.upstream_tls_ca_file or _DEBIAN_CA_BUNDLE,
     )
     master_cf = _ENV.get_template("master.cf.j2").render(

@@ -34,6 +34,7 @@ services:
       RELAY_COOKIE_SECURE: "true"
       RELAY_POSTFIX_CONTROL_SOCKET: /shared-config/control.sock
       RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
+      RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE: ${RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE:-60}
       # From the shell environment or a .env file next to this file — see
       # .env.example. Never given a value here directly.
       RELAY_ENCRYPTION_KEY: ${RELAY_ENCRYPTION_KEY:-}
@@ -103,7 +104,12 @@ services:
       # falls back to $myhostname as the realm — postfix-architecture.md §5).
       RELAY_SUBMISSION_HOST: ${RELAY_SUBMISSION_HOST:-smtp-relay.internal}
     ports:
-      - "587:587"
+      # SMTP submission. Published on every host interface by default; set
+      # SUBMISSION_BIND_ADDRESS in .env to a LAN address (e.g.
+      # 192.168.1.10) to keep it off any public interface (#171). Like
+      # APP_HOST_PORT, this has to be a variable here: Compose concatenates
+      # `ports` across override files rather than replacing them.
+      - "${SUBMISSION_BIND_ADDRESS:-0.0.0.0}:587:587"
     # postfix genuinely isn't running yet on a brand-new deployment until
     # the app container's entrypoint successfully pushes the first
     # generated config (postfix-architecture.md §7 — nothing else starts

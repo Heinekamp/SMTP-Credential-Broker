@@ -59,6 +59,16 @@ smtpd_recipient_restrictions =
     permit_sasl_authenticated
     reject_unauth_destination
 smtpd_helo_required = yes
+# Brute-force limits for SMTP AUTH (#171). anvil counts AUTH commands per
+# client IP per minute; many internal services can share one IP behind
+# Docker/NAT, so the default (RELAY_SUBMISSION_AUTH_RATE_LIMIT_PER_MINUTE)
+# is generous. Within one session, every failed AUTH is an error: after 2
+# Postfix starts sleeping between replies, after 5 it disconnects —
+# instead of its default 20 guesses per connection.
+smtpd_client_auth_rate_limit = {{ submission_auth_rate_limit_per_minute }}
+anvil_rate_time_unit = 60s
+smtpd_soft_error_limit = 2
+smtpd_hard_error_limit = 5
 # Enforces LocalSmtpUser.rate_limit_per_hour, keyed on sasl_username —
 # Postfix's own anvil limiter only keys on client IP, which can't tell
 # local users sharing one apart. Once per message (not per recipient),

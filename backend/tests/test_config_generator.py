@@ -199,6 +199,20 @@ def test_upstream_ca_file_override_is_rendered(db_session: Session, monkeypatch:
     assert "smtp_tls_CAfile = /upstream-ca/bundle.crt" in main_cf
 
 
+def test_smtp_auth_brute_force_limits_are_rendered(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for #171: no AUTH rate limit, and Postfix's default
+    of 20 errors per session before disconnecting."""
+    from app.config import get_settings
+
+    main_cf, _ = _render_config(db_session)
+    assert "smtpd_client_auth_rate_limit = 60" in main_cf
+    assert "smtpd_hard_error_limit = 5" in main_cf
+
+    monkeypatch.setattr(get_settings(), "submission_auth_rate_limit_per_minute", 0)
+    main_cf, _ = _render_config(db_session)
+    assert "smtpd_client_auth_rate_limit = 0" in main_cf
+
+
 def test_rate_limit_policy_service_fails_open_when_unreachable(db_session: Session) -> None:
     """Regression test for #167: without a default action Postfix waits
     100s and then tempfails every message whenever `app` is down."""
