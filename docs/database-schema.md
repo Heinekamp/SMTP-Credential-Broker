@@ -114,6 +114,7 @@ Credentials issued to internal services (InvenTree, monitoring, printers...).
 | `rate_limit_per_hour` | integer, nullable | `null` = unlimited (default). Enforced by the rate-limit policy service (postfix-architecture.md §10, security-model.md §10) against §12's counter table, keyed on this user's `username` as the authenticated SASL identity. |
 | `rate_limit_burst` | integer, nullable | `null` = no burst protection (default). Only accepted, and only enforced, alongside `rate_limit_per_hour` — its refill rate is always derived from that field (postfix-architecture.md §10's burst-protection subsection). Backed by §13's token-bucket table. |
 | `rate_limit_defer_streak_started_at` | timestamp, nullable | `null` = not currently in an unbroken streak of rejections. Set on any defer, cleared on any permit or on being re-enabled — backs the always-visible `rate_limit_abuse` alert and the opt-in auto-disable tick (postfix-architecture.md §10's abuse-detection subsection). |
+| `rate_limit_defer_streak_last_at` | timestamp, nullable | Time of the latest defer in the current streak. A streak only continues while defers keep arriving at most 10 minutes apart, and the abuse alert and auto-disable require it to still be active (postfix-architecture.md §10, #183). |
 
 ## 6. `user_sender_permissions`
 

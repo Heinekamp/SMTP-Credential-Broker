@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core import postfix_control
 from app.core.clock import utcnow
 from app.core.health import run_health_check
+from app.core.rate_limit_policy import DEFER_STREAK_GAP
 from app.core.settings_store import get_background_job_state, get_relay_settings
 from app.core.update_check import parse_version
 from app.models.enums import TestResult
@@ -98,7 +99,15 @@ def compute_active_alerts(db: Session) -> list[Alert]:
         )
         .all()
     )
+    active_cutoff = utcnow() - DEFER_STREAK_GAP
     for user in throttled_users:
+        # An enabled user's streak only counts while defers keep coming —
+        # a single rejection followed by silence isn't "throttled
+        # continuously" (#183). A disabled (e.g. auto-disabled) user stops
+        # sending, so their alert stays until an admin re-enables them.
+        last_defer = user.rate_limit_defer_streak_last_at
+        if user.enabled and (last_defer is None or last_defer < active_cutoff):
+            continue
         since = user.rate_limit_defer_streak_started_at
         if user.enabled:
             detail = (

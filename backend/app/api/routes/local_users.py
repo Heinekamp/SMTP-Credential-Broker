@@ -222,6 +222,7 @@ def update_user(
             # should clear a stuck streak, rather than leaving it flagged
             # on the alerts bell forever even after being fixed.
             user.rate_limit_defer_streak_started_at = None
+            user.rate_limit_defer_streak_last_at = None
             db.flush()
             _set_sasl_or_503(user.username, new_password)
 

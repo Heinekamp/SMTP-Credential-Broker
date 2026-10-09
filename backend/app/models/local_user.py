@@ -47,6 +47,11 @@ class LocalSmtpUser(Base):
     # tick (core/rate_limit_abuse.py); a plain timestamp, not a counter,
     # since "how long has this been continuous" is what actually matters.
     rate_limit_defer_streak_started_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
+    # When the latest defer in the streak happened. A streak only continues
+    # while defers keep coming (rate_limit_policy.DEFER_STREAK_GAP apart at
+    # most) — one deferred message followed by silence used to count as
+    # "throttled continuously" forever and could trigger auto-disable (#183).
+    rate_limit_defer_streak_last_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True, default=None)
 
     # passive_deletes=True: see the identical comment on Sender.permissions
     # (sender.py) — user_sender_permissions.local_smtp_user_id is part of

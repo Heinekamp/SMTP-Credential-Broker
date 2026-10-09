@@ -154,7 +154,9 @@ def test_no_postfix_update_alert_when_control_surface_unreachable(
     assert compute_active_alerts(db_session) == []
 
 
-def _throttled_user(db: Session, *, minutes_ago: float, enabled: bool = True, name: str = "Printer") -> LocalSmtpUser:
+def _throttled_user(
+    db: Session, *, minutes_ago: float, enabled: bool = True, name: str = "Printer", last_defer_minutes_ago: float = 0.5
+) -> LocalSmtpUser:
     user = LocalSmtpUser(
         name=name,
         username=name.lower().replace(" ", "-"),
@@ -162,6 +164,7 @@ def _throttled_user(db: Session, *, minutes_ago: float, enabled: bool = True, na
         enabled=enabled,
         rate_limit_per_hour=10,
         rate_limit_defer_streak_started_at=utcnow() - datetime.timedelta(minutes=minutes_ago),
+        rate_limit_defer_streak_last_at=utcnow() - datetime.timedelta(minutes=last_defer_minutes_ago),
     )
     db.add(user)
     db.commit()
@@ -219,3 +222,17 @@ def test_one_alert_per_throttled_user(db_session: Session) -> None:
 
     keys = {a.key for a in alerts}
     assert keys == {f"rate_limit_abuse:{u1.id}", f"rate_limit_abuse:{u2.id}"}
+
+
+def test_no_rate_limit_abuse_alert_once_the_deferrals_stop(db_session: Session) -> None:
+    """Regression test for #183: one deferred message followed by silence
+    used to read as "throttled continuously" forever."""
+    _throttled_user(db_session, minutes_ago=60, last_defer_minutes_ago=59)
+    assert compute_active_alerts(db_session) == []
+
+
+def test_an_auto_disabled_user_keeps_its_alert_after_going_quiet(db_session: Session) -> None:
+    """A disabled user can't send, so its streak naturally goes quiet — the
+    alert must stay until an admin re-enables it."""
+    _throttled_user(db_session, minutes_ago=60, last_defer_minutes_ago=59, enabled=False)
+    assert len(compute_active_alerts(db_session)) == 1

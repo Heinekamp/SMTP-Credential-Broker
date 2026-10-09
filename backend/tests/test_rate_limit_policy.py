@@ -223,3 +223,35 @@ def test_parse_attributes_splits_name_value_lines() -> None:
         "sasl_username": "printer-service",
         "sender": "printer@example.com",
     }
+
+
+def test_a_defer_after_a_long_quiet_gap_starts_a_new_streak(db_session: Session) -> None:
+    """Regression test for #183: a streak only continues while deferrals
+    keep arriving. After more than DEFER_STREAK_GAP of silence, the next
+    deferral starts a fresh streak instead of extending a stale one."""
+    user = _user(db_session, rate_limit_per_hour=1)
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # first defer
+    stale = utcnow() - datetime.timedelta(minutes=45)
+    user.rate_limit_defer_streak_started_at = stale
+    user.rate_limit_defer_streak_last_at = stale + datetime.timedelta(seconds=5)
+    db_session.commit()
+
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})  # defer after 45 min of silence
+
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_started_at > stale + datetime.timedelta(minutes=40)
+    assert user.rate_limit_defer_streak_last_at == user.rate_limit_defer_streak_started_at
+
+
+def test_each_defer_records_the_latest_deferral_time(db_session: Session) -> None:
+    user = _user(db_session, rate_limit_per_hour=1)
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    db_session.refresh(user)
+    first_last = user.rate_limit_defer_streak_last_at
+    assert first_last is not None
+    rate_limit_policy.evaluate(db_session, {"sasl_username": "printer-service"})
+    db_session.refresh(user)
+    assert user.rate_limit_defer_streak_last_at >= first_last
+    assert user.rate_limit_defer_streak_started_at <= user.rate_limit_defer_streak_last_at

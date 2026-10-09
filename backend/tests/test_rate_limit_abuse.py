@@ -21,7 +21,12 @@ from app.models.settings import RelaySettings
 
 
 def _throttled_user(
-    db: Session, *, minutes_ago: float, enabled: bool = True, username: str = "printer-service"
+    db: Session,
+    *,
+    minutes_ago: float,
+    enabled: bool = True,
+    username: str = "printer-service",
+    last_defer_minutes_ago: float = 0.5,
 ) -> LocalSmtpUser:
     user = LocalSmtpUser(
         name="Printer",
@@ -30,6 +35,7 @@ def _throttled_user(
         enabled=enabled,
         rate_limit_per_hour=10,
         rate_limit_defer_streak_started_at=utcnow() - datetime.timedelta(minutes=minutes_ago),
+        rate_limit_defer_streak_last_at=utcnow() - datetime.timedelta(minutes=last_defer_minutes_ago),
     )
     db.add(user)
     db.commit()
@@ -155,3 +161,13 @@ def test_tick_does_nothing_when_disabled() -> None:
     db = SessionLocal()
     assert db.get(LocalSmtpUser, user_id).enabled is True
     db.close()
+
+
+def test_does_not_disable_a_user_whose_deferrals_stopped(db_session: Session) -> None:
+    """Regression test for #183: a single deferred message followed by
+    silence used to get a user auto-disabled once the threshold passed."""
+    _enable_auto_disable(db_session)
+    user = _throttled_user(db_session, minutes_ago=60, last_defer_minutes_ago=30)
+    assert run_rate_limit_abuse_detection(db_session) == []
+    db_session.refresh(user)
+    assert user.enabled is True
