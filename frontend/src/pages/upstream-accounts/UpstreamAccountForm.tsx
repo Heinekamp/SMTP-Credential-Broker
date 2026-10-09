@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Card, Select, TextInput } from "../../design-system/components";
+import { Button, Card, Checkbox, Select, TextInput } from "../../design-system/components";
 import {
   createUpstreamAccount,
   getUpstreamAccount,
@@ -36,6 +36,7 @@ export function UpstreamAccountForm() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [rateLimitPerHour, setRateLimitPerHour] = useState("");
+  const [tlsSkipVerify, setTlsSkipVerify] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Adjusts local state when the fetched entity changes, without an
@@ -50,6 +51,7 @@ export function UpstreamAccountForm() {
       setTlsMode(existing.tls_mode);
       setUsername(existing.username);
       setRateLimitPerHour(existing.rate_limit_per_hour === null ? "" : String(existing.rate_limit_per_hour));
+      setTlsSkipVerify(existing.tls_skip_verify);
     }
   }
 
@@ -62,6 +64,7 @@ export function UpstreamAccountForm() {
         tls_mode: tlsMode,
         username,
         rate_limit_per_hour: rateLimitPerHour.trim() === "" ? null : Number(rateLimitPerHour),
+        tls_skip_verify: tlsSkipVerify,
         ...(password ? { password } : {}),
       };
       return isEdit ? updateUpstreamAccount(accountId!, input) : createUpstreamAccount({ ...input, password });
@@ -121,6 +124,23 @@ export function UpstreamAccountForm() {
           <option value="starttls">STARTTLS</option>
           <option value="implicit">Implicit TLS</option>
         </Select>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)", marginBottom: 4 }}>
+          <Checkbox checked={tlsSkipVerify} onChange={(e) => setTlsSkipVerify(e.target.checked)} />
+          Skip certificate verification (not recommended)
+        </label>
+        <p
+          style={{
+            color: tlsSkipVerify ? "var(--status-armed)" : "var(--text-muted)",
+            fontSize: "var(--text-2xs)",
+            marginTop: 0,
+            marginBottom: 14,
+          }}
+        >
+          {tlsSkipVerify
+            ? "The connection to this provider is still encrypted, but its identity isn't checked: anyone able to intercept it would receive this account's password. Only use this for a provider whose certificate doesn't match its hostname."
+            : "The provider's certificate must be valid for the host above, so the password is only ever sent to the real server."}
+        </p>
 
         <label style={labelStyle} htmlFor="ua-username">Username</label>
         <TextInput id="ua-username" value={username} onChange={(e) => setUsername(e.target.value)} style={fieldStyle} required />

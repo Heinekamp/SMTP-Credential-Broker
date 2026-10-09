@@ -38,6 +38,7 @@ def run_connection_test_batch(db: Session) -> int:
             host=account.host,
             port=account.port,
             tls_mode=account.tls_mode,
+            tls_skip_verify=account.tls_skip_verify,
             username=account.username,
             password=password,
         )

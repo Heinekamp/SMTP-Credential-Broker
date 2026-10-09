@@ -68,6 +68,7 @@ def _to_read(db: Session, account: UpstreamAccount) -> UpstreamAccountRead:
         host=account.host,
         port=account.port,
         tls_mode=account.tls_mode,
+        tls_skip_verify=account.tls_skip_verify,
         username=account.username,
         enabled=account.enabled,
         last_test_at=account.last_test_at,
@@ -103,6 +104,7 @@ def create_account(
         host=payload.host,
         port=payload.port,
         tls_mode=payload.tls_mode,
+        tls_skip_verify=payload.tls_skip_verify,
         username=payload.username,
         encrypted_password=_encrypt_or_503(payload.password),
         rate_limit_per_hour=payload.rate_limit_per_hour,
@@ -223,6 +225,7 @@ def test_connection(account_id: int, db: Session = Depends(get_db)) -> TestConne
         host=account.host,
         port=account.port,
         tls_mode=account.tls_mode,
+        tls_skip_verify=account.tls_skip_verify,
         username=account.username,
         password=password,
     )
