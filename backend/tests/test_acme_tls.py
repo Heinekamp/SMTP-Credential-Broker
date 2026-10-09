@@ -505,3 +505,21 @@ def test_issue_or_renew_saves_the_certificate_when_postfix_is_unreachable(
     assert state.source == "lets_encrypt"
     assert state.cert_pem == "CERT-PEM"
     assert decrypt_secret(state.encrypted_key_pem) == "KEY-PEM"
+
+
+def test_finalize_manual_dns_challenge_refuses_after_the_domain_changed(db_session: Session) -> None:
+    """Regression test for #199: changing the domain mid-challenge and then
+    confirming used to install a certificate for the old domain."""
+    _configure_manual(db_session, domain="old.example.com")
+    acme_tls.begin_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
+    get_relay_settings(db_session).tls_domain = "new.example.com"
+    db_session.commit()
+
+    result = acme_tls.finalize_manual_dns_challenge(db_session, issuer=_FakePendingIssuer())
+
+    assert result.success is False
+    assert result.detail == (
+        "This DNS-01 challenge was for old.example.com, but the configured domain is now "
+        "new.example.com. Start a new challenge."
+    )
+    assert get_tls_pending_manual_challenge(db_session) is None

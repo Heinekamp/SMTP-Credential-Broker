@@ -162,3 +162,22 @@ def test_reset_admin_password_refuses_a_short_password() -> None:
     db = SessionLocal()
     assert verify_password(db.get(AdminUser, admin_id).password_hash, "old-password") is True
     db.close()
+
+
+def test_create_admin_normalizes_the_email_like_login_does() -> None:
+    """Regression test for #199: the CLI stored the email as typed, but
+    login looks it up EmailStr-normalised (lower-cased domain), so
+    `Admin@Example.COM` could never log in."""
+    result = runner.invoke(
+        cli, ["create-admin", "--email", "Admin@Example.COM"], input="New-Sup3rSecret!\nNew-Sup3rSecret!\n"
+    )
+    assert result.exit_code == 0, result.output
+    db = SessionLocal()
+    assert db.query(AdminUser).one().email == "Admin@example.com"
+    db.close()
+
+    # And the lookups normalise too, so any casing of the domain finds it.
+    reset = runner.invoke(
+        cli, ["reset-admin-password", "Admin@EXAMPLE.com"], input="Other-Sup3rSecret!\nOther-Sup3rSecret!\n"
+    )
+    assert reset.exit_code == 0, reset.output

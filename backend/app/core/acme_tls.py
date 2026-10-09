@@ -492,6 +492,17 @@ def finalize_manual_dns_challenge(db: Session, *, issuer: AcmeIssuer | None = No
         clear_tls_pending_manual_challenge(db)
         return CertificateIssuanceResult(success=False, detail="This DNS-01 challenge expired. Start a new one.")
 
+    current_domain = get_relay_settings(db).tls_domain
+    if row.domain != current_domain:
+        # The domain setting changed after this challenge started —
+        # finishing it would install a certificate for the old one (#199).
+        clear_tls_pending_manual_challenge(db)
+        detail = (
+            f"This DNS-01 challenge was for {row.domain}, but the configured domain is now "
+            f"{current_domain or 'unset'}. Start a new challenge."
+        )
+        return CertificateIssuanceResult(success=False, detail=detail)
+
     propagated = ManualDnsProvider().wait_for_propagation(
         row.record_name, row.record_value, timeout_seconds=_MANUAL_CONFIRM_TIMEOUT
     )

@@ -371,3 +371,64 @@ def test_new_admin_passwords_need_twelve_characters(admin_client: TestClient) ->
         "/api/admins", json={"email": "new@example.com", "password": short}, headers=csrf_headers(admin_client)
     )
     assert create.status_code == 422
+
+
+def test_two_admins_deactivating_each_other_concurrently_leave_one_active(tmp_path, monkeypatch) -> None:
+    """Regression test for #199: both requests used to count two active
+    admins and both proceed, leaving none — recoverable only from the CLI."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.api import deps
+    from app.api.routes import admins as admin_routes
+    from app.core.security import hash_password
+    from app.db.base import Base
+    from app.models.admin import AdminUser
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'admins.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    credentials = {"a@example.com": "Admin-Passw0rd-A", "b@example.com": "Admin-Passw0rd-B"}
+    with session_factory() as setup:
+        setup.add_all(AdminUser(email=email, password_hash=hash_password(pw)) for email, pw in credentials.items())
+        setup.commit()
+
+    def _per_request_session():
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    real_revoke = admin_routes.revoke_all_sessions_for_admin
+
+    def _slow_revoke(*args, **kwargs):
+        time.sleep(0.2)  # widen the check-then-act window
+        return real_revoke(*args, **kwargs)
+
+    monkeypatch.setattr(admin_routes, "revoke_all_sessions_for_admin", _slow_revoke)
+    app.dependency_overrides[deps.get_db] = _per_request_session
+    try:
+        with TestClient(app) as a, TestClient(app) as b:
+            for client, email in ((a, "a@example.com"), (b, "b@example.com")):
+                login = client.post("/api/auth/login", json={"email": email, "password": credentials[email]})
+                assert login.status_code == 200
+            ids = {admin["email"]: admin["id"] for admin in a.get("/api/admins").json()}
+
+            def _deactivate(client: TestClient, target_id: int) -> int:
+                return client.patch(
+                    f"/api/admins/{target_id}", json={"is_active": False}, headers=csrf_headers(client)
+                ).status_code
+
+            jobs = [(a, ids["b@example.com"]), (b, ids["a@example.com"])]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                codes = sorted(pool.map(lambda job: _deactivate(*job), jobs))
+    finally:
+        app.dependency_overrides.clear()
+
+    with session_factory() as check:
+        assert check.query(AdminUser).filter(AdminUser.is_active.is_(True)).count() == 1
+    assert codes == [200, 409]
+    engine.dispose()

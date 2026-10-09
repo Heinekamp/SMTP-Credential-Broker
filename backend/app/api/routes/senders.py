@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -56,6 +57,17 @@ def list_senders(db: Session = Depends(get_db)) -> list[SenderRead]:
     return [_to_read(db, s) for s in senders]
 
 
+def _require_unique_address(db: Session, address: str, *, ignore_id: int | None = None) -> None:
+    """Case-insensitively: Postfix folds lookup-map keys to lower case, so
+    `Ceo@example.com` and `ceo@example.com` would be one map entry, with
+    postmap silently keeping only one of them (#199)."""
+    query = db.query(Sender).filter(func.lower(Sender.address) == address.lower())
+    if ignore_id is not None:
+        query = query.filter(Sender.id != ignore_id)
+    if query.first() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "A sender with this address already exists")
+
+
 @router.post("", response_model=SenderRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_csrf)])
 def create_sender(
     payload: SenderCreate,
@@ -64,6 +76,7 @@ def create_sender(
     admin: AdminUser = Depends(get_current_admin),
 ) -> SenderRead:
     _require_upstream_account(db, payload.upstream_account_id)
+    _require_unique_address(db, payload.address)
     sender = Sender(
         address=payload.address,
         upstream_account_id=payload.upstream_account_id,
@@ -109,6 +122,8 @@ def update_sender(
     data = payload.model_dump(exclude_unset=True)
     if "upstream_account_id" in data and data["upstream_account_id"] is not None:
         _require_upstream_account(db, data["upstream_account_id"])
+    if "address" in data:
+        _require_unique_address(db, data["address"], ignore_id=sender.id)
     for field, value in data.items():
         setattr(sender, field, value)
     try:

@@ -534,3 +534,10 @@ def test_re_enable_with_invalid_rate_limits_never_writes_sasldb(
     )
     assert response.status_code == 422
     assert len(fake_postfix_control) == calls_before
+
+
+def test_usernames_are_unique_case_insensitively(admin_client: TestClient, fake_postfix_control: list) -> None:
+    """Regression test for #199: Postfix folds map keys and SASL names to
+    lower case, so `Printer` and `printer` would be the same login to it."""
+    assert _create_user(admin_client, "printer").status_code == 201
+    assert _create_user(admin_client, "Printer").status_code == 409

@@ -187,3 +187,29 @@ def test_explicit_null_on_a_required_sender_field_is_a_422_not_a_409(admin_clien
         f"/api/senders/{sender['id']}", json={"description": None}, headers=csrf_headers(admin_client)
     )
     assert ok.status_code == 200  # nullable by meaning
+
+
+def test_sender_addresses_are_unique_case_insensitively(admin_client: TestClient) -> None:
+    """Regression test for #199: two senders differing only in case became
+    one Postfix map key, with postmap silently keeping just one."""
+    upstream_id = _create_upstream(admin_client)
+
+    def _create(address: str):
+        return admin_client.post(
+            "/api/senders",
+            json={"address": address, "upstream_account_id": upstream_id},
+            headers=csrf_headers(admin_client),
+        )
+
+    assert _create("ceo@example.com").status_code == 201
+    assert _create("Ceo@example.com").status_code == 409
+    other = _create("cfo@example.com").json()
+    rename = admin_client.patch(
+        f"/api/senders/{other['id']}", json={"address": "CEO@example.com"}, headers=csrf_headers(admin_client)
+    )
+    assert rename.status_code == 409
+    # Re-saving its own address (any case) is not a conflict with itself.
+    same = admin_client.patch(
+        f"/api/senders/{other['id']}", json={"address": "cfo@example.com"}, headers=csrf_headers(admin_client)
+    )
+    assert same.status_code == 200
