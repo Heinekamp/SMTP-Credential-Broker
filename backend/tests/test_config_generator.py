@@ -415,3 +415,10 @@ def test_alias_lookups_are_disabled(db_session: Session) -> None:
     main_cf, _ = _render_config(db_session)
     assert "\nalias_maps =\n" in main_cf
     assert "\nalias_database =\n" in main_cf
+
+
+def test_cyrus_sasl_config_path_points_at_the_image_s_smtpd_conf(db_session: Session) -> None:
+    """Regression test for #230: left unset, smtpd.conf's mech_list never
+    applied and every installed SASL mechanism was offered."""
+    main_cf, _ = _render_config(db_session)
+    assert "\ncyrus_sasl_config_path = /etc/postfix/sasl\n" in main_cf

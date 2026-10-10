@@ -41,6 +41,9 @@ smtpd_tls_mandatory_ciphers = high
 # ── Client-facing (smtpd) SASL ──────────────────────────────────────
 smtpd_sasl_type = cyrus
 smtpd_sasl_path = smtpd
+# Where postfix/Dockerfile puts smtpd.conf (mech_list: PLAIN LOGIN). Left
+# unset, this Debian build never read that file (#230).
+cyrus_sasl_config_path = /etc/postfix/sasl
 smtpd_sasl_auth_enable = yes
 smtpd_sasl_security_options = noanonymous
 smtpd_sasl_local_domain =

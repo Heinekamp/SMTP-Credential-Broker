@@ -156,7 +156,7 @@ default_transport = error:5.7.1 No upstream route for this sender
 - **`smtpd_sasl_type = cyrus` / `smtpd_sasl_path = smtpd`** — tells Postfix's
   `smtpd` process to authenticate via the Cyrus SASL library using the
   `smtpd` service name, which the Cyrus SASL config
-  (`/usr/lib/sasl2/smtpd.conf`) points at the `sasldb` auxprop plugin — i.e.
+  (`/etc/postfix/sasl/smtpd.conf`, named by `cyrus_sasl_config_path`) points at the `sasldb` auxprop plugin — i.e.
   at `/etc/sasldb2`. This is the local SMTP AUTH identity check (#1).
 - **`broken_sasl_auth_clients = yes`** — accepts the old
   (pre-RFC-4954-draft-final) `AUTH=` syntax some embedded devices (printers,
@@ -404,15 +404,19 @@ postfix image at build time rather than left as a runtime surprise:
    directory entry but not read its contents, and every AUTH fails with a
    generic `454 4.7.0 Temporary authentication failure`, not a permission
    error pointing at the real cause.
-2. Cyrus SASL's `smtpd` service needs `/usr/lib/sasl2/smtpd.conf` telling
+2. Cyrus SASL's `smtpd` service needs `/etc/postfix/sasl/smtpd.conf` telling
    it which auxprop plugin to consult at all:
    ```
    pwcheck_method: auxprop
    auxprop_plugin: sasldb
    mech_list: PLAIN LOGIN
    ```
-   Without this file, nothing points the library at `sasldb`/`/etc/sasldb2`
-   in the first place, and every AUTH fails with that same generic error.
+   `sasldb` happens to be the library's default, so AUTH works even
+   without the file, but then `mech_list` doesn't apply and every
+   installed mechanism is advertised (SCRAM-*, DIGEST-MD5, CRAM-MD5,
+   NTLM). That's what happened until #230: the file was written to
+   `/usr/lib/sasl2/`, which this Debian build never reads. main.cf now
+   names the directory explicitly (`cyrus_sasl_config_path`).
 
 See [security-model.md](security-model.md) §4 for the full threat-model
 discussion of this being the one place a plaintext-equivalent secret must
