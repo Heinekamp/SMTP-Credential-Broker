@@ -77,6 +77,18 @@ def test_invalid_credentials_are_rejected(api: httpx.Client, uid: str) -> None:
         client.quit()
 
 
+def test_only_plain_and_login_are_offered(api: httpx.Client) -> None:
+    """Regression test for #230: Cyrus SASL's smtpd.conf sat in a directory
+    this Postfix never reads, so its `mech_list: PLAIN LOGIN` was ignored
+    and every installed mechanism was advertised (SCRAM-*, DIGEST-MD5,
+    CRAM-MD5, NTLM)."""
+    client = _connect_submission()
+    try:
+        assert set(client.esmtp_features["auth"].split()) == {"PLAIN", "LOGIN"}
+    finally:
+        client.quit()
+
+
 def test_placeholder_tls_key_is_generated_per_deployment(api: httpx.Client) -> None:
     """Regression test for #173: the placeholder certificate and private key
     used to be generated at image build time, so every deployment from the

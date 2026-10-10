@@ -46,8 +46,14 @@ RUN mkdir -p /etc/postfix/tls
 #      root:sasl, mode 660 — but smtpd runs as user/group `postfix`, which
 #      isn't a member of `sasl`, so it can't read the file it needs to
 #      authenticate against.
-RUN mkdir -p /usr/lib/sasl2 \
-    && printf 'pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n' > /usr/lib/sasl2/smtpd.conf \
+#
+# The config lives in /etc/postfix/sasl, which main.cf names explicitly
+# (cyrus_sasl_config_path). It used to be written to /usr/lib/sasl2, a
+# path this Debian build never reads, so `mech_list` was ignored and smtpd
+# offered every installed mechanism (SCRAM-*, DIGEST-MD5, CRAM-MD5, NTLM)
+# instead of only PLAIN and LOGIN (#230).
+RUN mkdir -p /etc/postfix/sasl \
+    && printf 'pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n' > /etc/postfix/sasl/smtpd.conf \
     && adduser postfix sasl
 
 # /etc/sasldb2 lived only in the container's own writable layer, with
