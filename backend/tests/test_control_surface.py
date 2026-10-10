@@ -816,3 +816,28 @@ def test_a_large_fully_ingested_maillog_is_rotated_keeping_one_copy(monkeypatch:
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("maillog.")) == [
         "maillog.20260201-000000.gz"
     ]
+
+
+def test_status_uses_the_quiet_running_check_not_postfix_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test for #228: `postfix status` writes four maillog lines
+    per call, and the health endpoint calls this constantly."""
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess:
+        calls.append(args)
+        return _completed(0)
+
+    monkeypatch.setattr(control_surface, "_run", fake_run)
+    assert control_surface._status({}) == {
+        "ok": True,
+        "running": True,
+        "detail": "the Postfix mail system is running",
+    }
+    assert calls == [["/usr/local/bin/postfix-running"]]
+
+
+def test_status_reports_not_running_on_a_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(control_surface, "_run", lambda args, *, input_text=None: _completed(1))
+    result = control_surface._status({})
+    assert result["running"] is False
+    assert result["detail"] == "the Postfix mail system is not running"

@@ -6,6 +6,7 @@ from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db
+from app.core.logging_config import get_logger
 from app.core.mail_log_ingest import ingest_new_log_lines
 from app.core.postfix_control import PostfixControlError
 from app.models.enums import MailStatus
@@ -13,6 +14,7 @@ from app.models.mail_log import MailLog
 from app.schemas.mail_log import MailLogEntry, MailLogPage
 
 router = APIRouter(prefix="/mail-log", tags=["mail-log"], dependencies=[Depends(get_current_admin)])
+_logger = get_logger("mail_log")
 
 
 def _naive_utc(value: datetime.datetime | None) -> datetime.datetime | None:
@@ -36,14 +38,14 @@ def list_mail_log(
     offset: int = Query(default=0, ge=0),
 ) -> MailLogPage:
     try:
-        # Ingested on-demand rather than by a standing background worker
-        # (spec doesn't require sub-second freshness, and a worker thread
-        # would need its own coordination story across multiple uvicorn
-        # workers) — best-effort: an unreachable Postfix container means a
-        # stale-but-still-servable log view, not a broken page.
+        # The background tick (mail_log_ingest_tick) keeps the table
+        # current; this just picks up anything from the last minute so the
+        # page is fresh. Best-effort: an unreachable Postfix container means
+        # a stale-but-still-servable log view, not a broken page — but no
+        # longer a silent one (#228).
         ingest_new_log_lines(db)
-    except PostfixControlError:
-        pass
+    except PostfixControlError as exc:
+        _logger.warning("mail log ingestion failed while serving the Mail Log page: %s", exc)
 
     query = db.query(MailLog)
     if envelope_sender:

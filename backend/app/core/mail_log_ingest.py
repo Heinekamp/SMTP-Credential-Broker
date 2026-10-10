@@ -13,6 +13,7 @@ table an admin wants to see update live as a message moves through the
 queue (queued -> sent/deferred/bounced).
 """
 
+import asyncio
 import threading
 import uuid
 
@@ -20,8 +21,9 @@ from sqlalchemy.orm import Session
 
 from app.core import mail_log_parser as parser
 from app.core.logging_config import get_logger
-from app.core.postfix_control import tail_maillog
+from app.core.postfix_control import PostfixControlError, tail_maillog
 from app.core.settings_store import get_or_create_singleton
+from app.db.session import SessionLocal
 from app.models.enums import MailStatus
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
@@ -29,10 +31,10 @@ from app.models.sender import Sender
 
 _logger = get_logger("mail_log_ingest")
 
-# ingest_new_log_lines runs on every GET /api/mail-log request (this
-# module's own docstring), with no coordination between them — two
-# concurrent requests (two admin tabs, or a poll overlapping a manual
-# refresh; sync FastAPI `def` routes run in a thread pool, so this is real
+# ingest_new_log_lines runs on every GET /api/mail-log request and from
+# the minute tick below, with no coordination between them — two
+# concurrent runs (two admin tabs, a page load overlapping the tick; sync
+# FastAPI `def` routes and the tick both run in threads, so this is real
 # thread concurrency even with a single uvicorn worker, which is this
 # app's deployment model) could both read the same stale byte_offset, both
 # tail the same maillog bytes, and both independently create a row for the
@@ -158,3 +160,52 @@ def _ingest_new_log_lines_locked(db: Session) -> int:
     state.maillog_inode = tail.inode
     db.commit()
     return len(tail.lines)
+
+# Each tail_maillog call returns at most 4 MiB, so a backlog takes several
+# calls. 50 of them is far more than a minute's worth of log on any
+# realistic relay; anything left over is picked up by the next tick.
+_MAX_CHUNKS_PER_TICK = 50
+
+# Whether the previous background tick failed, so an outage is logged once
+# when it starts and once when it ends rather than every minute.
+_last_tick_failed = False
+
+
+def ingest_until_caught_up(db: Session) -> int:
+    """Calls ingest_new_log_lines until the maillog has nothing new (or the
+    per-tick cap is hit) and returns the total number of lines processed."""
+    total = 0
+    for _ in range(_MAX_CHUNKS_PER_TICK):
+        processed = ingest_new_log_lines(db)
+        total += processed
+        if processed == 0:
+            break
+    return total
+
+
+def _mail_log_ingest_tick_sync() -> None:
+    # Ingestion used to happen only when someone opened the Mail Log page,
+    # and the maillog lived only in the postfix container, so every deploy
+    # in between threw the unread lines away (#228). Reading every minute
+    # keeps the unread window small even across a deploy.
+    global _last_tick_failed
+    db = SessionLocal()
+    try:
+        ingest_until_caught_up(db)
+    except PostfixControlError as exc:
+        db.rollback()
+        if not _last_tick_failed:
+            _logger.warning("mail log ingestion failed, retrying every minute: %s", exc)
+        _last_tick_failed = True
+        return
+    finally:
+        db.close()
+    if _last_tick_failed:
+        _logger.info("mail log ingestion recovered")
+    _last_tick_failed = False
+
+
+async def mail_log_ingest_tick() -> None:
+    # Blocking control-surface I/O and DB writes — same reason as
+    # connection_test_tick for running off the event loop.
+    await asyncio.to_thread(_mail_log_ingest_tick_sync)

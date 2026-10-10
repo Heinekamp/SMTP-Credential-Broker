@@ -24,6 +24,11 @@ mynetworks = 127.0.0.0/8
 mydestination =
 relay_domains =
 local_transport = error:local mail delivery is disabled on this relay
+# No local delivery, so no aliases. The defaults (hash:/etc/aliases,
+# nis:mail.aliases) made every smtpd connection log an aliases.db error and
+# a NIS warning into the maillog (#228).
+alias_maps =
+alias_database =
 
 # ── Client-facing (smtpd) TLS ───────────────────────────────────────
 smtpd_tls_cert_file = /etc/postfix/tls/relay.crt

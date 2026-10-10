@@ -157,16 +157,19 @@ the same convention used for scheduler-triggered rows.
 
 ## Mail Log
 
-### A message shows in the Postfix queue but never appears in the Mail Log screen
+### Relayed mail is missing from the Mail Log
 
-The log ingestion pipeline tails and parses Postfix's own log file,
-matched by queue ID; it's a distinct pipeline from delivery itself and
-can lag briefly under load. If a specific message *never* appears despite
-enough time passing, check `mail_log_ingest_state.byte_offset` isn't
-stuck — a Postfix log rotation that isn't coordinated with this table's
-offset tracking is the one scenario known to cause a permanent gap rather
-than a transient lag; restarting `app` alone doesn't fix this, since the
-offset is persisted in the database, not in memory.
+The app reads Postfix's log into the Mail Log every minute (and whenever
+the page loads), matched by queue ID, so a message can take up to a
+minute to appear. If messages don't appear at all:
+
+- `docker compose logs app | grep "mail log ingestion"` shows whether
+  reading the log is failing; it's logged once when it starts failing and
+  once when it recovers.
+- **Before 0.3.6**, mail could go missing for good. The log was read only
+  when someone opened the Mail Log page, and it lived inside the `postfix`
+  container, so every deploy threw away anything not yet read (#228).
+  Those entries can't be recovered; the mail itself was still delivered.
 
 ### Mail Log timestamps look shifted from what Postfix's own logs show
 

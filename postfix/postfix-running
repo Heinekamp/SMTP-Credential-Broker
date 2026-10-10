@@ -1,0 +1,16 @@
+#!/bin/sh
+# Exits 0 when Postfix's master process is running, non-zero otherwise.
+# Used by the Docker health check and the control surface's `status` op.
+#
+# This is the same lock test `postfix status` makes (postfix-script runs
+# `master -t`, which exits 0 only when master.pid isn't locked), minus the
+# logging: every `postfix status` writes four lines to the maillog, and the
+# health checks run it every few seconds, which buried the mail log in
+# noise (#228). Without a main.cf there's nothing running yet (the app
+# hasn't applied its first config), and `master -t` would fail for that
+# reason alone, so check that first.
+[ -f /etc/postfix/main.cf ] || exit 1
+if "$(postconf -h daemon_directory)/master" -t 2>/dev/null; then
+    exit 1
+fi
+exit 0

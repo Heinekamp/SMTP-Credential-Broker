@@ -510,6 +510,21 @@ between. The entrypoint separately `tail -F`s the same file to this
 container's own stdout purely so `docker compose logs postfix` keeps
 working as a live operator view — nothing functional depends on that part.
 
+**When it's read, and where it's kept.** The app ingests every minute in
+the background (`mail_log_ingest_tick`), reading in 4 MiB chunks until it
+has caught up, and once more whenever the Mail Log page loads. A failing
+read is logged once when it starts failing and once when it recovers.
+`/var/log/postfix` is its own `postfix_log` volume, so a deploy that
+recreates the container keeps any lines not yet read. The control surface
+rotates the file at 32 MiB, keeping one older copy. Before #228 the log
+was read only when someone opened the Mail Log page, and it lived in the
+container's writable layer, so every deploy silently dropped whatever
+hadn't been read yet.
+
+The health checks don't use `postfix status`, which writes four lines to
+this log per call. `postfix-running` (in the image) makes the same
+`master -t` lock test without logging anything.
+
 **Correlation strategy.** A single delivery is scattered across several log
 lines from different Postfix services, all sharing one queue ID assigned by
 `cleanup(8)`:

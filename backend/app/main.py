@@ -31,6 +31,7 @@ from app.core.acme_tls import sync_certificate_to_postfix
 from app.core.alert_email import alert_email_tick
 from app.core.cert_renewal import cert_renewal_tick
 from app.core.logging_config import configure_logging
+from app.core.mail_log_ingest import mail_log_ingest_tick
 from app.core.rate_limit_abuse import rate_limit_abuse_tick
 from app.core.rate_limit_cleanup import rate_limit_cleanup_tick
 from app.core.rate_limit_policy import run_policy_service
@@ -79,6 +80,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             asyncio.create_task(run_periodic("update_check", _POLL_SECONDS, update_check_tick)),
             asyncio.create_task(run_periodic("alert_email", _POLL_SECONDS, alert_email_tick)),
             asyncio.create_task(run_periodic("retention_cleanup", _POLL_SECONDS, retention_cleanup_tick)),
+            asyncio.create_task(run_periodic("mail_log_ingest", _POLL_SECONDS, mail_log_ingest_tick)),
             asyncio.create_task(run_periodic("cert_renewal", _POLL_SECONDS, cert_renewal_tick)),
             asyncio.create_task(run_periodic("rate_limit_cleanup", _POLL_SECONDS, rate_limit_cleanup_tick)),
             asyncio.create_task(run_periodic("rate_limit_abuse", _POLL_SECONDS, rate_limit_abuse_tick)),

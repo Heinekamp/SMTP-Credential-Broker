@@ -90,7 +90,8 @@ RUN mkdir -p "$SASLDB_DIR" && chgrp sasl "$SASLDB_DIR" && chmod 770 "$SASLDB_DIR
 
 COPY control_surface.py /control_surface.py
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY postfix-running /usr/local/bin/postfix-running
+RUN chmod +x /entrypoint.sh /usr/local/bin/postfix-running
 
 # Generated lookup maps (sender_login, sender_relayhost, sasl_passwd, ...)
 # live here. Private to this container: the control socket that `app`

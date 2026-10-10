@@ -110,6 +110,11 @@ services:
       # package itself at image build time, so this populates the same
       # way postfix_tls's placeholder does — confirmed directly.
       - postfix_queue:/var/spool/postfix
+      # Postfix's own log (main.cf's maillog_file), which mail-log
+      # ingestion reads. It used to live in the container's writable layer,
+      # so every deploy threw away whatever hadn't been ingested yet (#228).
+      # The control surface rotates it at 32 MiB, keeping one old copy.
+      - postfix_log:/var/log/postfix
     environment:
       # Must match app's RELAY_SUBMISSION_HOST exactly — it's the SASL
       # realm saslpasswd2 stores credentials under, and has to agree with
@@ -128,8 +133,10 @@ services:
     # generated config (postfix-architecture.md §7 — nothing else starts
     # it) — a generous start_period avoids a false "unhealthy" flap on
     # first boot rather than reporting a real problem.
+    # postfix-running is `postfix status`'s own lock test without the four
+    # maillog lines `postfix status` writes on every call (#228).
     healthcheck:
-      test: ["CMD", "postfix", "status"]
+      test: ["CMD", "postfix-running"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -142,3 +149,4 @@ volumes:
   postfix_tls:
   sasldb:
   postfix_queue:
+  postfix_log:

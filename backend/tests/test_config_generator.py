@@ -407,3 +407,11 @@ def test_reload_flag_stays_true_when_unchanged_but_postfix_is_not_actually_runni
     generate_and_apply(db_session, triggered_by_admin_id=None)
 
     assert calls == [True, True]
+
+
+def test_alias_lookups_are_disabled(db_session: Session) -> None:
+    """Regression test for #228: the default alias_maps made every smtpd
+    connection log an aliases.db error and a NIS warning."""
+    main_cf, _ = _render_config(db_session)
+    assert "\nalias_maps =\n" in main_cf
+    assert "\nalias_database =\n" in main_cf
