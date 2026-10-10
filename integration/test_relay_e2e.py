@@ -92,6 +92,22 @@ def test_placeholder_tls_key_is_generated_per_deployment(api: httpx.Client) -> N
     assert marker.returncode == 0
 
 
+def _maillog_running_lines() -> int:
+    result = _compose_exec("postfix", "grep", "-c", "mail system is running", "/var/log/postfix/maillog")
+    return int(result.stdout.strip() or 0)
+
+
+def test_health_checks_do_not_write_to_the_maillog(api: httpx.Client) -> None:
+    """Regression test for #228: the health checks used `postfix status`,
+    which writes four maillog lines per call. The health endpoint and the
+    Docker health check ran it every few seconds, burying the mail log."""
+    assert _compose_exec("postfix", "postfix-running").returncode == 0
+    before = _maillog_running_lines()
+    for _ in range(5):
+        assert api.get("/api/health").json()["postfix_running"]["ok"] is True
+    assert _maillog_running_lines() == before
+
+
 def test_repeated_failed_auth_in_one_session_is_cut_off(api: httpx.Client, uid: str) -> None:
     """Regression test for #171: Postfix's default allows 20 errors per
     session, i.e. 20 password guesses per connection. With
@@ -679,6 +695,19 @@ def test_local_user_password_survives_postfix_container_recreation(api: httpx.Cl
         client.login(username, password)  # must still work after recreation
     finally:
         client.quit()
+
+
+def test_maillog_survives_postfix_container_recreation(api: httpx.Client) -> None:
+    """Regression test for #228: the maillog lived only in the postfix
+    container's writable layer, so every deploy threw away whatever mail
+    the app hadn't ingested yet — two weeks of relayed mail on production."""
+    first_line = _compose_exec("postfix", "head", "-n", "1", "/var/log/postfix/maillog").stdout
+    assert first_line.strip()
+
+    _force_recreate_postfix()
+    _push_config_with_retry(api)
+
+    assert _compose_exec("postfix", "head", "-n", "1", "/var/log/postfix/maillog").stdout == first_line
 
 
 def _wait_for_queue_entry(api: httpx.Client, predicate, timeout: float = 10.0) -> dict | None:

@@ -206,7 +206,7 @@ process liveness. `GET /api/health` (`app/core/health.py`) runs four checks (ano
 
 - **Database reachable** — a real `SELECT 1`, not just "process is up."
 - **Postfix reachable and running** — via a `status` op on the control
-  surface (security-model.md §6), which wraps `postfix status`. A
+  surface (security-model.md §6), which runs `postfix-running` — `postfix status`'s own lock test, without the log lines `postfix status` writes. A
   successful RPC round-trip already proves the control surface itself is
   reachable; "running" is the separate question of whether Postfix's
   master process has actually started.

@@ -130,7 +130,10 @@ one, not a stale copy from before the rotation.
   existed, only a plain restart was actually durable; a real deploy's
   container recreation silently discarded whatever was still queued).
 - **`mail_log` history** is part of the database backup above like any
-  other table — no separate step needed.
+  other table — no separate step needed. Postfix's raw log, which the app
+  reads into it every minute, is on its own `postfix_log` volume, so a
+  deploy doesn't lose lines that haven't been read yet. It's not worth
+  backing up: anything already ingested is in the database.
 - **TLS certificates** in the `postfix_tls` volume: if you've provisioned
   a Let's Encrypt certificate from Settings → TLS Certificate (see
   [configuration.md](configuration.md#tls-certificates)), the certificate

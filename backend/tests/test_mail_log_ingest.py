@@ -5,8 +5,9 @@ import time
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core import mail_log_ingest
 from app.core.mail_log_ingest import ingest_new_log_lines
-from app.core.postfix_control import MaillogTail
+from app.core.postfix_control import MaillogTail, PostfixControlError
 from app.models.enums import MailStatus, TlsMode
 from app.models.local_user import LocalSmtpUser
 from app.models.mail_log import MailLog, MailLogIngestState
@@ -306,3 +307,83 @@ def test_parsed_timestamp_is_used(db_session: Session, _seed: None, monkeypatch:
     assert row.timestamp.day == 14
     assert row.timestamp.hour == 10
     assert isinstance(row.timestamp, datetime.datetime)
+
+
+def _tail_of(since_offset: int, lines: list[str]) -> MaillogTail:
+    consumed = sum(len(line) + 1 for line in lines)
+    return MaillogTail(lines=lines, new_offset=since_offset + consumed, truncated=False, inode=1)
+
+
+_ENQUEUED = "Jun 10 12:34:56 relay postfix/qmgr[1]: {qid}: from=<printer@example.com>, size=1, nrcpt=1 (queue active)"
+
+
+class _RecordingLogger:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def warning(self, msg: str, *args) -> None:
+        self.records.append(("warning", msg % args))
+
+    def info(self, msg: str, *args) -> None:
+        self.records.append(("info", msg % args))
+
+
+def test_ingest_until_caught_up_keeps_reading_until_nothing_is_new(
+    db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for #228: one tail_maillog call returns at most 4 MiB,
+    so a backlog needs several."""
+    chunks = [[_ENQUEUED.format(qid="4XYZ0001")], [_ENQUEUED.format(qid="4XYZ0002")], []]
+    calls: list[int] = []
+
+    def fake_tail(since_offset: int, since_inode: int | None = None) -> MaillogTail:
+        lines = chunks[len(calls)]
+        calls.append(since_offset)
+        return _tail_of(since_offset, lines)
+
+    monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", fake_tail)
+
+    assert mail_log_ingest.ingest_until_caught_up(db_session) == 2
+    assert len(calls) == 3
+    assert {row.queue_id for row in db_session.query(MailLog)} == {"4XYZ0001", "4XYZ0002"}
+
+
+def test_background_tick_ingests_with_its_own_session(
+    db_session: Session, _seed: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served = iter([[_ENQUEUED.format(qid="4XYZ0001")], []])
+
+    def fake_tail(since_offset: int, since_inode: int | None = None) -> MaillogTail:
+        return _tail_of(since_offset, next(served))
+
+    monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", fake_tail)
+    monkeypatch.setattr("app.core.mail_log_ingest.SessionLocal", lambda: db_session)
+
+    mail_log_ingest._mail_log_ingest_tick_sync()
+    assert db_session.query(MailLog).filter(MailLog.queue_id == "4XYZ0001").count() == 1
+
+
+def test_background_tick_logs_an_outage_once_and_its_recovery(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failures used to be swallowed silently (#228) — but a postfix outage
+    mustn't log a warning every minute either."""
+    logger = _RecordingLogger()
+    monkeypatch.setattr(mail_log_ingest, "_logger", logger)
+    monkeypatch.setattr(mail_log_ingest, "_last_tick_failed", False)
+    monkeypatch.setattr("app.core.mail_log_ingest.SessionLocal", lambda: db_session)
+
+    def boom(since_offset: int, since_inode: int | None = None) -> MaillogTail:
+        raise PostfixControlError("control surface unreachable")
+
+    monkeypatch.setattr("app.core.mail_log_ingest.tail_maillog", boom)
+    mail_log_ingest._mail_log_ingest_tick_sync()
+    mail_log_ingest._mail_log_ingest_tick_sync()
+    assert logger.records == [
+        ("warning", "mail log ingestion failed, retrying every minute: control surface unreachable")
+    ]
+
+    _patch_tail(monkeypatch, [])
+    mail_log_ingest._mail_log_ingest_tick_sync()
+    mail_log_ingest._mail_log_ingest_tick_sync()
+    assert logger.records[1:] == [("info", "mail log ingestion recovered")]

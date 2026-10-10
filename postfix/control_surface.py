@@ -558,10 +558,15 @@ def _status(payload: dict) -> dict:
     surface reachable at all," which a successful RPC round-trip already
     proves on its own. Not running is an entirely expected state before
     the very first successful `apply_config` (see that function's
-    comment: nothing else starts Postfix), not necessarily a fault."""
-    result = _run(["postfix", "status"])
-    detail = (result.stdout + result.stderr).strip()
-    return {"ok": True, "running": result.returncode == 0, "detail": detail}
+    comment: nothing else starts Postfix), not necessarily a fault.
+
+    Not `postfix status`: that writes four maillog lines per call, and the
+    app's health endpoint calls this constantly (#228). `postfix-running`
+    makes the same lock test without logging anything."""
+    result = _run(["/usr/local/bin/postfix-running"])
+    running = result.returncode == 0
+    detail = "the Postfix mail system is running" if running else "the Postfix mail system is not running"
+    return {"ok": True, "running": running, "detail": detail}
 
 
 def _version(payload: dict) -> dict:
