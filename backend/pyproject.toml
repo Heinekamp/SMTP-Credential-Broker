@@ -36,7 +36,7 @@ dev = [
 # Only used by scripts/screenshots/ (README screenshot regeneration) —
 # never needed to run or test the app itself, so kept out of `dev`.
 screenshots = [
-    "playwright>=1.47",
+    "playwright>=1.63.0",
     "pillow>=12.3.0",
 ]
 
