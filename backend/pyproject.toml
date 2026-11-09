@@ -23,7 +23,7 @@ dependencies = [
     "requests>=2.34.2",
     "acme>=5.8.0",
     "dnspython>=2.9.1",
-    "python-multipart>=0.0.32",
+    "python-multipart>=0.0.33",
 ]
 
 [project.optional-dependencies]
